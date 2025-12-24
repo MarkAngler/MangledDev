@@ -1,17 +1,27 @@
 {
   "workflows": [
     {
-      "id": "18142caf-1242-474f-83ea-925ac224b1df",
-      "name": "test",
+      "id": "68a7fe06-fa5e-41a9-a16d-0c0c9450c4a4",
+      "name": "implement",
       "steps": [
         {
-          "id": "bb24b301-842f-4a0f-8cba-f3409101085b",
+          "id": "04aaff1d-918f-4072-920b-3077c99edff7",
           "label": "start",
-          "command": "/"
+          "command": "/mangled-agents:coreflow:do"
+        },
+        {
+          "id": "64918b9b-9e18-4698-8fea-67aa7eae6e0f",
+          "label": "validate",
+          "command": "/validate"
+        },
+        {
+          "id": "481bcfa7-3c0a-4a79-9eba-df636be69e60",
+          "label": "ship",
+          "command": "/ship"
         }
       ],
-      "createdAt": "2025-12-24T17:31:47.044Z"
+      "createdAt": "2025-12-24T17:35:57.511Z"
     }
   ],
-  "lastUpdated": "2025-12-24T17:31:47.044Z"
+  "lastUpdated": "2025-12-24T17:36:37.790Z"
 }
