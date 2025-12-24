@@ -32,7 +32,8 @@ class PtyManager {
       status: s.status,
       cols: s.cols,
       rows: s.rows,
-      cwd: s.cwd
+      cwd: s.cwd,
+      skipPermissions: s.skipPermissions
     }));
   }
 
@@ -40,11 +41,12 @@ class PtyManager {
     return this.sessions.get(id);
   }
 
-  createSession(name, cols = 80, rows = 24, cwd = null) {
+  createSession(name, cols = 80, rows = 24, cwd = null, skipPermissions = false) {
     const id = uuidv4();
     const workingDir = cwd || process.cwd();
+    const args = skipPermissions ? ['--dangerously-skip-permissions'] : [];
 
-    const term = pty.spawn('claude', [], {
+    const term = pty.spawn('claude', args, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -60,6 +62,7 @@ class PtyManager {
       cols,
       rows,
       cwd: workingDir,
+      skipPermissions,
       pty: term,
       outputBuffer: ''
     };
@@ -89,7 +92,8 @@ class PtyManager {
       status: session.status,
       cols: session.cols,
       rows: session.rows,
-      cwd: session.cwd
+      cwd: session.cwd,
+      skipPermissions: session.skipPermissions
     };
   }
 
@@ -128,7 +132,9 @@ class PtyManager {
       session.pty.kill();
     }
 
-    const term = pty.spawn('claude', [], {
+    const args = session.skipPermissions ? ['--dangerously-skip-permissions'] : [];
+
+    const term = pty.spawn('claude', args, {
       name: 'xterm-256color',
       cols: session.cols,
       rows: session.rows,

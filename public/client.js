@@ -12,14 +12,15 @@ async function fetchSessions() {
   return res.json();
 }
 
-async function createSession(name) {
+async function createSession(name, skipPermissions = false) {
   const res = await fetch('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name,
       cols: terminal ? terminal.cols : 80,
-      rows: terminal ? terminal.rows : 24
+      rows: terminal ? terminal.rows : 24,
+      skipPermissions
     })
   });
   return res.json();
@@ -458,6 +459,7 @@ async function refreshSessions() {
 // Event listeners
 document.getElementById('new-session-btn').addEventListener('click', () => {
   document.getElementById('session-name-input').value = '';
+  document.getElementById('skip-permissions-input').checked = false;
   document.getElementById('new-session-dialog').showModal();
 });
 
@@ -469,7 +471,8 @@ document.getElementById('new-session-dialog').addEventListener('close', async ()
   if (document.getElementById('new-session-dialog').returnValue === 'cancel') return;
 
   const name = document.getElementById('session-name-input').value.trim();
-  const session = await createSession(name || undefined);
+  const skipPermissions = document.getElementById('skip-permissions-input').checked;
+  const session = await createSession(name || undefined, skipPermissions);
   await refreshSessions();
   connectToSession(session.id, session.name);
 });

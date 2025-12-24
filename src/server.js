@@ -21,9 +21,9 @@ function startServer(port) {
     });
 
     app.post('/api/sessions', (req, res) => {
-      const { name, cols, rows, cwd } = req.body;
+      const { name, cols, rows, cwd, skipPermissions } = req.body;
       try {
-        const session = ptyManager.createSession(name, cols, rows, cwd);
+        const session = ptyManager.createSession(name, cols, rows, cwd, skipPermissions);
         res.status(201).json(session);
       } catch (err) {
         res.status(500).json({ error: err.message });

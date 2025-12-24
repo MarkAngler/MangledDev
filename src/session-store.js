@@ -25,7 +25,8 @@ function saveSessions(sessions) {
       status: s.status,
       cols: s.cols,
       rows: s.rows,
-      cwd: s.cwd
+      cwd: s.cwd,
+      skipPermissions: s.skipPermissions
     })),
     lastUpdated: new Date().toISOString()
   };
