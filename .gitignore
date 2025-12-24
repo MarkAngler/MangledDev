@@ -32,3 +32,4 @@ coverage/
 dist/
 build/
 publish.sh
+bin/

@@ -1,6 +1,6 @@
 {
   "name": "mangleddev",
-  "version": "0.0.3",
+  "version": "0.0.2",
   "description": "Web-based terminal manager for Claude Code instances",
   "main": "src/server.js",
   "bin": {

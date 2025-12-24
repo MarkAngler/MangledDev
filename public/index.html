@@ -15,6 +15,7 @@
         <div id="view-tabs">
           <button class="view-tab active" data-view="sessions">Sessions</button>
           <button class="view-tab" data-view="extensions">Extensions</button>
+          <button class="view-tab" data-view="config">Config</button>
         </div>
         <button id="new-session-btn">+ New Session</button>
       </div>
@@ -45,6 +46,21 @@
       <div id="extensions-content">
         <div id="extensions-loading">Loading extensions...</div>
         <div id="extensions-grid"></div>
+      </div>
+    </main>
+    <main id="config-area" style="display: none;">
+      <div id="config-header">
+        <span id="config-file-name">Select a file</span>
+        <div id="config-controls" style="display: none;">
+          <button id="save-config-btn">Save</button>
+          <button id="discard-config-btn">Discard</button>
+        </div>
+      </div>
+      <div id="config-content">
+        <div id="config-file-list"></div>
+        <div id="config-editor-container">
+          <textarea id="config-editor" placeholder="Select a file to edit..."></textarea>
+        </div>
       </div>
     </main>
   </div>

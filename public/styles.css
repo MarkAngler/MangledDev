@@ -619,3 +619,157 @@ dialog input:focus {
   font-style: italic;
   padding: 8px 12px;
 }
+
+/* Config Area */
+#config-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #252526;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+#config-file-name {
+  font-size: 14px;
+  color: #ccc;
+}
+
+#config-file-name.modified::after {
+  content: ' •';
+  color: #dcdcaa;
+}
+
+#config-controls {
+  display: flex;
+  gap: 8px;
+}
+
+#config-controls button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#save-config-btn {
+  background: #0e639c;
+  color: #fff;
+}
+
+#save-config-btn:hover {
+  background: #1177bb;
+}
+
+#discard-config-btn {
+  background: #3c3c3c;
+  color: #ccc;
+}
+
+#discard-config-btn:hover {
+  background: #4c4c4c;
+}
+
+#config-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+#config-file-list {
+  width: 250px;
+  border-right: 1px solid #3c3c3c;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.config-file-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  cursor: pointer;
+  gap: 8px;
+}
+
+.config-file-item:hover {
+  background: #2a2d2e;
+}
+
+.config-file-item.active {
+  background: #37373d;
+}
+
+.config-file-item.disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.config-file-item.disabled:hover {
+  background: transparent;
+}
+
+.config-file-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.config-file-icon.exists {
+  background: #4ec9b0;
+}
+
+.config-file-icon.missing {
+  background: #6c6c6c;
+}
+
+.config-file-path {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#config-editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#config-editor {
+  flex: 1;
+  resize: none;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border: none;
+  padding: 16px;
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+#config-editor:focus {
+  outline: none;
+}
+
+#config-editor::placeholder {
+  color: #6c6c6c;
+}
+
+.config-empty-message {
+  color: #888;
+  text-align: center;
+  padding: 40px;
+  font-size: 14px;
+}

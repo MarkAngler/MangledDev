@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -158,6 +159,164 @@ function startServer(port) {
         res.json(extensions);
       } catch (err) {
         console.error('Error scanning extensions:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Config file API endpoints
+    const isValidConfigPath = (filePath, cwd) => {
+      const resolved = path.resolve(cwd, filePath);
+      const claudeDir = path.join(cwd, '.claude');
+      const claudeMd = path.join(cwd, 'CLAUDE.md');
+
+      // Must be CLAUDE.md at root or within .claude directory
+      if (resolved === claudeMd) return true;
+      if (resolved.startsWith(claudeDir + path.sep)) return true;
+      return false;
+    };
+
+    const scanConfigFiles = (cwd) => {
+      const files = [];
+
+      // Check for CLAUDE.md
+      const claudeMd = path.join(cwd, 'CLAUDE.md');
+      files.push({
+        path: 'CLAUDE.md',
+        type: 'markdown',
+        exists: fs.existsSync(claudeMd)
+      });
+
+      // Check .claude directory
+      const claudeDir = path.join(cwd, '.claude');
+      if (fs.existsSync(claudeDir)) {
+        // Known config files
+        const knownFiles = ['settings.json', 'settings.local.json'];
+        for (const file of knownFiles) {
+          const filePath = path.join(claudeDir, file);
+          files.push({
+            path: `.claude/${file}`,
+            type: 'json',
+            exists: fs.existsSync(filePath)
+          });
+        }
+
+        // Scan for .md files in .claude root
+        try {
+          const entries = fs.readdirSync(claudeDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isFile() && entry.name.endsWith('.md')) {
+              files.push({
+                path: `.claude/${entry.name}`,
+                type: 'markdown',
+                exists: true
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Error reading .claude directory:', err);
+        }
+
+        // Scan .claude/rules directory
+        const rulesDir = path.join(claudeDir, 'rules');
+        if (fs.existsSync(rulesDir)) {
+          try {
+            const entries = fs.readdirSync(rulesDir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isFile() && entry.name.endsWith('.md')) {
+                files.push({
+                  path: `.claude/rules/${entry.name}`,
+                  type: 'markdown',
+                  exists: true
+                });
+              }
+            }
+          } catch (err) {
+            console.error('Error reading .claude/rules directory:', err);
+          }
+        }
+
+        // Scan .claude/commands directory
+        const commandsDir = path.join(claudeDir, 'commands');
+        if (fs.existsSync(commandsDir)) {
+          try {
+            const entries = fs.readdirSync(commandsDir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isFile() && entry.name.endsWith('.md')) {
+                files.push({
+                  path: `.claude/commands/${entry.name}`,
+                  type: 'markdown',
+                  exists: true
+                });
+              }
+            }
+          } catch (err) {
+            console.error('Error reading .claude/commands directory:', err);
+          }
+        }
+      }
+
+      return files;
+    };
+
+    app.get('/api/config/files', (req, res) => {
+      try {
+        const cwd = process.cwd();
+        const files = scanConfigFiles(cwd);
+        res.json({ cwd, files });
+      } catch (err) {
+        console.error('Error scanning config files:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.get('/api/config/file', (req, res) => {
+      try {
+        const cwd = process.cwd();
+        const filePath = req.query.path;
+
+        if (!filePath) {
+          return res.status(400).json({ error: 'path query parameter required' });
+        }
+
+        if (!isValidConfigPath(filePath, cwd)) {
+          return res.status(403).json({ error: 'Access denied: invalid config path' });
+        }
+
+        const fullPath = path.resolve(cwd, filePath);
+        if (!fs.existsSync(fullPath)) {
+          return res.status(404).json({ error: 'File not found' });
+        }
+
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        res.json({ path: filePath, content });
+      } catch (err) {
+        console.error('Error reading config file:', err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.put('/api/config/file', (req, res) => {
+      try {
+        const cwd = process.cwd();
+        const { path: filePath, content } = req.body;
+
+        if (!filePath) {
+          return res.status(400).json({ error: 'path is required' });
+        }
+
+        if (content === undefined) {
+          return res.status(400).json({ error: 'content is required' });
+        }
+
+        if (!isValidConfigPath(filePath, cwd)) {
+          return res.status(403).json({ error: 'Access denied: invalid config path' });
+        }
+
+        const fullPath = path.resolve(cwd, filePath);
+        fs.writeFileSync(fullPath, content, 'utf-8');
+        res.json({ success: true });
+      } catch (err) {
+        console.error('Error writing config file:', err);
         res.status(500).json({ error: err.message });
       }
     });

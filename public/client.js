@@ -6,6 +6,10 @@ let taskPanelCollapsed = false;
 let editingTaskId = null;
 let currentView = 'sessions';
 let extensionsData = null;
+let configFilesData = null;
+let currentConfigFile = null;
+let originalConfigContent = null;
+let configModified = false;
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -323,7 +327,136 @@ function renderExtensionItem(type, item) {
   return el;
 }
 
+// Config API and rendering
+async function fetchConfigFiles() {
+  const res = await fetch('/api/config/files');
+  return res.json();
+}
+
+async function fetchConfigFile(filePath) {
+  const res = await fetch(`/api/config/file?path=${encodeURIComponent(filePath)}`);
+  if (!res.ok) {
+    throw new Error('Failed to load file');
+  }
+  return res.json();
+}
+
+async function saveConfigFile(filePath, content) {
+  const res = await fetch('/api/config/file', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: filePath, content })
+  });
+  if (!res.ok) {
+    throw new Error('Failed to save file');
+  }
+  return res.json();
+}
+
+function renderConfigFiles(data) {
+  const list = document.getElementById('config-file-list');
+  list.innerHTML = '';
+
+  if (!data.files || data.files.length === 0) {
+    list.innerHTML = '<div class="config-empty-message">No config files found</div>';
+    return;
+  }
+
+  for (const file of data.files) {
+    const item = document.createElement('div');
+    const isDisabled = !file.exists;
+    item.className = 'config-file-item' + (currentConfigFile === file.path ? ' active' : '') + (isDisabled ? ' disabled' : '');
+    item.dataset.path = file.path;
+
+    item.innerHTML = `
+      <span class="config-file-icon ${file.exists ? 'exists' : 'missing'}"></span>
+      <span class="config-file-path">${escapeHtml(file.path)}</span>
+    `;
+
+    if (!isDisabled) {
+      item.addEventListener('click', () => selectConfigFile(file.path));
+    }
+
+    list.appendChild(item);
+  }
+}
+
+async function selectConfigFile(filePath) {
+  if (configModified && currentConfigFile !== filePath) {
+    const discard = confirm('You have unsaved changes. Discard them?');
+    if (!discard) return;
+  }
+
+  try {
+    const data = await fetchConfigFile(filePath);
+    currentConfigFile = filePath;
+    originalConfigContent = data.content;
+    configModified = false;
+
+    document.getElementById('config-file-name').textContent = filePath;
+    document.getElementById('config-file-name').classList.remove('modified');
+    document.getElementById('config-editor').value = data.content;
+    document.getElementById('config-controls').style.display = 'flex';
+
+    document.querySelectorAll('.config-file-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.path === filePath);
+    });
+  } catch (err) {
+    console.error('Error loading config file:', err);
+    alert('Failed to load file: ' + err.message);
+  }
+}
+
+function handleConfigInput() {
+  const editor = document.getElementById('config-editor');
+  const wasModified = configModified;
+  configModified = editor.value !== originalConfigContent;
+
+  if (configModified !== wasModified) {
+    document.getElementById('config-file-name').classList.toggle('modified', configModified);
+  }
+}
+
+async function handleConfigSave() {
+  if (!currentConfigFile) return;
+
+  try {
+    const content = document.getElementById('config-editor').value;
+    await saveConfigFile(currentConfigFile, content);
+    originalConfigContent = content;
+    configModified = false;
+    document.getElementById('config-file-name').classList.remove('modified');
+  } catch (err) {
+    console.error('Error saving config file:', err);
+    alert('Failed to save file: ' + err.message);
+  }
+}
+
+function handleConfigDiscard() {
+  if (!currentConfigFile) return;
+
+  document.getElementById('config-editor').value = originalConfigContent;
+  configModified = false;
+  document.getElementById('config-file-name').classList.remove('modified');
+}
+
+async function loadConfigFiles() {
+  try {
+    configFilesData = await fetchConfigFiles();
+    renderConfigFiles(configFilesData);
+  } catch (err) {
+    console.error('Error loading config files:', err);
+    document.getElementById('config-file-list').innerHTML = '<div class="config-empty-message">Failed to load config files</div>';
+  }
+}
+
 function switchView(view) {
+  if (currentView === 'config' && configModified && view !== 'config') {
+    const discard = confirm('You have unsaved changes. Discard them?');
+    if (!discard) return;
+    configModified = false;
+  }
+
   currentView = view;
 
   document.querySelectorAll('.view-tab').forEach(tab => {
@@ -332,9 +465,14 @@ function switchView(view) {
 
   document.getElementById('terminal-area').style.display = view === 'sessions' ? 'flex' : 'none';
   document.getElementById('extensions-area').style.display = view === 'extensions' ? 'flex' : 'none';
+  document.getElementById('config-area').style.display = view === 'config' ? 'flex' : 'none';
 
   if (view === 'extensions' && !extensionsData) {
     loadExtensions();
+  }
+
+  if (view === 'config' && !configFilesData) {
+    loadConfigFiles();
   }
 }
 
@@ -539,6 +677,11 @@ document.getElementById('refresh-extensions-btn').addEventListener('click', () =
   extensionsData = null;
   loadExtensions();
 });
+
+// Config event listeners
+document.getElementById('config-editor').addEventListener('input', handleConfigInput);
+document.getElementById('save-config-btn').addEventListener('click', handleConfigSave);
+document.getElementById('discard-config-btn').addEventListener('click', handleConfigDiscard);
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
