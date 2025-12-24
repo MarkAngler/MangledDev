@@ -35,3 +35,4 @@ publish.sh
 bin/
 tasks.json
 workflows.json
+tasks.json
