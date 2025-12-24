@@ -7,6 +7,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PtyManager } = require('./pty-manager.js');
 const { loadTasks, saveTasks } = require('./task-store.js');
+const { loadWorkflows, saveWorkflows } = require('./workflow-store.js');
 const { scanExtensions } = require('./extension-scanner.js');
 
 // Large files scanner configuration
@@ -154,6 +155,66 @@ function startServer(port) {
       tasks = reordered;
       saveTasks(tasks);
       res.json(tasks);
+    });
+
+    // Workflow API endpoints
+    let workflows = loadWorkflows();
+
+    app.get('/api/workflows', (req, res) => {
+      res.json(workflows);
+    });
+
+    app.post('/api/workflows', (req, res) => {
+      const { name, steps } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Name is required' });
+      }
+
+      const workflow = {
+        id: uuidv4(),
+        name: name.trim(),
+        steps: (steps || []).map(s => ({
+          id: uuidv4(),
+          label: s.label || '',
+          command: s.command || ''
+        })),
+        createdAt: new Date().toISOString()
+      };
+
+      workflows.push(workflow);
+      saveWorkflows(workflows);
+      res.status(201).json(workflow);
+    });
+
+    app.put('/api/workflows/:id', (req, res) => {
+      const workflow = workflows.find(w => w.id === req.params.id);
+      if (!workflow) {
+        return res.status(404).json({ error: 'Workflow not found' });
+      }
+
+      const { name, steps } = req.body;
+      if (name !== undefined) workflow.name = name.trim();
+      if (steps !== undefined) {
+        workflow.steps = steps.map(s => ({
+          id: s.id || uuidv4(),
+          label: s.label || '',
+          command: s.command || ''
+        }));
+      }
+
+      saveWorkflows(workflows);
+      res.json(workflow);
+    });
+
+    app.delete('/api/workflows/:id', (req, res) => {
+      const index = workflows.findIndex(w => w.id === req.params.id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Workflow not found' });
+      }
+
+      workflows.splice(index, 1);
+      saveWorkflows(workflows);
+      res.status(204).end();
     });
 
     // Extensions API endpoint

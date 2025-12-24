@@ -11,6 +11,11 @@ let currentConfigFile = null;
 let originalConfigContent = null;
 let configModified = false;
 let largeFilesData = null;
+let workflowsData = null;
+let workflowPanelVisible = false;
+let expandedWorkflows = new Set();
+let editingWorkflowId = null;
+let dialogSteps = [];
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -504,6 +509,212 @@ async function loadLargeFiles() {
   }
 }
 
+// Workflow API
+async function fetchWorkflows() {
+  const res = await fetch('/api/workflows');
+  return res.json();
+}
+
+async function createWorkflow(name, steps) {
+  const res = await fetch('/api/workflows', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, steps })
+  });
+  return res.json();
+}
+
+async function updateWorkflow(id, name, steps) {
+  const res = await fetch(`/api/workflows/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, steps })
+  });
+  return res.json();
+}
+
+async function deleteWorkflow(id) {
+  await fetch(`/api/workflows/${id}`, { method: 'DELETE' });
+}
+
+function renderWorkflowList(workflows) {
+  const list = document.getElementById('workflow-list');
+  list.innerHTML = '';
+
+  if (!workflows || workflows.length === 0) {
+    list.innerHTML = '<div class="workflow-empty">No workflows yet. Click + to create one.</div>';
+    return;
+  }
+
+  for (const workflow of workflows) {
+    const isExpanded = expandedWorkflows.has(workflow.id);
+    const item = document.createElement('div');
+    item.className = 'workflow-item' + (isExpanded ? ' expanded' : '');
+    item.dataset.id = workflow.id;
+
+    const header = document.createElement('div');
+    header.className = 'workflow-header';
+    header.innerHTML = `
+      <span class="workflow-chevron">&#9654;</span>
+      <span class="workflow-name">${escapeHtml(workflow.name)}</span>
+      <div class="workflow-controls">
+        <button class="workflow-edit-btn" title="Edit">&#9998;</button>
+        <button class="workflow-delete-btn" title="Delete">&times;</button>
+      </div>
+    `;
+
+    header.querySelector('.workflow-name').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleWorkflowExpand(workflow.id);
+    });
+
+    header.querySelector('.workflow-chevron').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleWorkflowExpand(workflow.id);
+    });
+
+    header.querySelector('.workflow-edit-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openWorkflowDialog(workflow);
+    });
+
+    header.querySelector('.workflow-delete-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm(`Delete workflow "${workflow.name}"?`)) {
+        await deleteWorkflow(workflow.id);
+        expandedWorkflows.delete(workflow.id);
+        refreshWorkflows();
+      }
+    });
+
+    const steps = document.createElement('div');
+    steps.className = 'workflow-steps';
+
+    if (workflow.steps && workflow.steps.length > 0) {
+      workflow.steps.forEach((step, index) => {
+        const stepEl = document.createElement('div');
+        stepEl.className = 'workflow-step';
+        stepEl.innerHTML = `
+          <span class="step-number">${index + 1}.</span>
+          <span class="step-label">${escapeHtml(step.label || step.command || 'Unnamed step')}</span>
+          <span class="step-insert-icon">&#8629;</span>
+        `;
+        stepEl.addEventListener('click', () => insertStepCommand(step));
+        steps.appendChild(stepEl);
+      });
+    } else {
+      steps.innerHTML = '<div class="workflow-step"><span class="step-label" style="color: #888;">No steps defined</span></div>';
+    }
+
+    item.appendChild(header);
+    item.appendChild(steps);
+    list.appendChild(item);
+  }
+}
+
+function toggleWorkflowExpand(workflowId) {
+  if (expandedWorkflows.has(workflowId)) {
+    expandedWorkflows.delete(workflowId);
+  } else {
+    expandedWorkflows.add(workflowId);
+  }
+  renderWorkflowList(workflowsData);
+}
+
+function insertStepCommand(step) {
+  if (!currentWs || currentWs.readyState !== WebSocket.OPEN) {
+    alert('No active session. Connect to a session first.');
+    return;
+  }
+
+  const command = step.command || '';
+  if (command) {
+    currentWs.send(JSON.stringify({ type: 'input', data: command }));
+  }
+}
+
+function toggleWorkflowPanel() {
+  workflowPanelVisible = !workflowPanelVisible;
+  const panel = document.getElementById('workflow-panel');
+  const toggleBtn = document.getElementById('workflow-toggle-btn');
+
+  panel.style.display = workflowPanelVisible ? 'flex' : 'none';
+  toggleBtn.classList.toggle('active', workflowPanelVisible);
+
+  if (workflowPanelVisible && !workflowsData) {
+    refreshWorkflows();
+  }
+
+  // Resize terminal when panel toggles
+  setTimeout(() => {
+    if (fitAddon) {
+      fitAddon.fit();
+    }
+  }, 50);
+}
+
+async function refreshWorkflows() {
+  try {
+    workflowsData = await fetchWorkflows();
+    renderWorkflowList(workflowsData);
+  } catch (err) {
+    console.error('Error loading workflows:', err);
+    document.getElementById('workflow-list').innerHTML = '<div class="workflow-empty">Failed to load workflows</div>';
+  }
+}
+
+function openWorkflowDialog(workflow = null) {
+  editingWorkflowId = workflow ? workflow.id : null;
+  document.getElementById('workflow-dialog-title').textContent = workflow ? 'Edit Workflow' : 'New Workflow';
+  document.getElementById('workflow-name-input').value = workflow ? workflow.name : '';
+
+  dialogSteps = workflow && workflow.steps ? workflow.steps.map(s => ({ ...s })) : [];
+  renderDialogSteps();
+
+  document.getElementById('workflow-dialog').showModal();
+}
+
+function renderDialogSteps() {
+  const list = document.getElementById('workflow-steps-list');
+  list.innerHTML = '';
+
+  dialogSteps.forEach((step, index) => {
+    const stepEl = document.createElement('div');
+    stepEl.className = 'step-editor';
+    stepEl.innerHTML = `
+      <div class="step-editor-row">
+        <input type="text" placeholder="Step label (e.g., Check status)" value="${escapeHtml(step.label || '')}">
+        <button type="button" class="step-remove-btn" title="Remove step">&times;</button>
+      </div>
+      <textarea placeholder="Command to insert (e.g., /help or a prompt)">${escapeHtml(step.command || '')}</textarea>
+    `;
+
+    stepEl.querySelector('input').addEventListener('input', (e) => {
+      dialogSteps[index].label = e.target.value;
+    });
+
+    stepEl.querySelector('textarea').addEventListener('input', (e) => {
+      dialogSteps[index].command = e.target.value;
+    });
+
+    stepEl.querySelector('.step-remove-btn').addEventListener('click', () => {
+      dialogSteps.splice(index, 1);
+      renderDialogSteps();
+    });
+
+    list.appendChild(stepEl);
+  });
+}
+
+function addDialogStep() {
+  dialogSteps.push({ label: '', command: '' });
+  renderDialogSteps();
+
+  // Scroll to the new step
+  const list = document.getElementById('workflow-steps-list');
+  list.scrollTop = list.scrollHeight;
+}
+
 function switchView(view) {
   if (currentView === 'config' && configModified && view !== 'config') {
     const discard = confirm('You have unsaved changes. Discard them?');
@@ -746,6 +957,39 @@ document.getElementById('discard-config-btn').addEventListener('click', handleCo
 document.getElementById('scan-large-files-btn').addEventListener('click', () => {
   largeFilesData = null;
   loadLargeFiles();
+});
+
+// Workflow event listeners
+document.getElementById('workflow-toggle-btn').addEventListener('click', toggleWorkflowPanel);
+
+document.getElementById('new-workflow-btn').addEventListener('click', () => {
+  openWorkflowDialog();
+});
+
+document.getElementById('add-step-btn').addEventListener('click', addDialogStep);
+
+document.getElementById('cancel-workflow-btn').addEventListener('click', () => {
+  document.getElementById('workflow-dialog').close('cancel');
+});
+
+document.getElementById('workflow-dialog').addEventListener('close', async () => {
+  if (document.getElementById('workflow-dialog').returnValue === 'cancel') return;
+
+  const name = document.getElementById('workflow-name-input').value.trim();
+  if (!name) return;
+
+  // Filter out empty steps
+  const steps = dialogSteps.filter(s => s.label.trim() || s.command.trim());
+
+  if (editingWorkflowId) {
+    await updateWorkflow(editingWorkflowId, name, steps);
+  } else {
+    await createWorkflow(name, steps);
+  }
+
+  editingWorkflowId = null;
+  dialogSteps = [];
+  refreshWorkflows();
 });
 
 // Initialize when DOM is ready

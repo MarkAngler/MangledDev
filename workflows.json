@@ -1,0 +1,17 @@
+{
+  "workflows": [
+    {
+      "id": "18142caf-1242-474f-83ea-925ac224b1df",
+      "name": "test",
+      "steps": [
+        {
+          "id": "bb24b301-842f-4a0f-8cba-f3409101085b",
+          "label": "start",
+          "command": "/"
+        }
+      ],
+      "createdAt": "2025-12-24T17:31:47.044Z"
+    }
+  ],
+  "lastUpdated": "2025-12-24T17:31:47.044Z"
+}

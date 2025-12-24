@@ -3,12 +3,21 @@
     {
       "id": "82d1692b-1e7d-4a61-b8b9-c5b53aa58af2",
       "title": "scan for large files",
-      "completed": false,
+      "completed": true,
       "priority": "medium",
       "dueDate": null,
       "order": 0,
       "createdAt": "2025-12-24T12:56:23.802Z"
+    },
+    {
+      "id": "7965907f-07fb-4369-a6d0-ca4b211f86b5",
+      "title": "workflows",
+      "completed": false,
+      "priority": "medium",
+      "dueDate": null,
+      "order": 1,
+      "createdAt": "2025-12-24T15:51:14.790Z"
     }
   ],
-  "lastUpdated": "2025-12-24T12:56:23.803Z"
+  "lastUpdated": "2025-12-24T15:51:14.790Z"
 }

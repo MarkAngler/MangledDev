@@ -36,6 +36,7 @@
           <button id="restart-btn" title="Restart">Restart</button>
           <button id="stop-btn" title="Stop">Stop</button>
         </div>
+        <button id="workflow-toggle-btn" title="Toggle Workflows">Workflows</button>
       </div>
       <div id="terminal-container"></div>
     </main>
@@ -80,6 +81,13 @@
         <div id="large-files-results"></div>
       </div>
     </main>
+    <aside id="workflow-panel" style="display: none;">
+      <div id="workflow-header">
+        <span>Workflows</span>
+        <button id="new-workflow-btn" title="New Workflow">+</button>
+      </div>
+      <div id="workflow-list"></div>
+    </aside>
   </div>
 
   <dialog id="new-session-dialog">
@@ -122,6 +130,27 @@
       <div id="dialog-buttons">
         <button type="button" id="cancel-task-btn">Cancel</button>
         <button type="submit" id="save-task-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="workflow-dialog">
+    <form method="dialog">
+      <h2 id="workflow-dialog-title">New Workflow</h2>
+      <label>
+        Name:
+        <input type="text" id="workflow-name-input" required>
+      </label>
+      <div id="workflow-steps-container">
+        <div id="workflow-steps-header">
+          <span>Steps</span>
+          <button type="button" id="add-step-btn">+ Add Step</button>
+        </div>
+        <div id="workflow-steps-list"></div>
+      </div>
+      <div id="dialog-buttons">
+        <button type="button" id="cancel-workflow-btn">Cancel</button>
+        <button type="submit" id="save-workflow-btn">Save</button>
       </div>
     </form>
   </dialog>
