@@ -10,6 +10,7 @@ let configFilesData = null;
 let currentConfigFile = null;
 let originalConfigContent = null;
 let configModified = false;
+let largeFilesData = null;
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -450,6 +451,59 @@ async function loadConfigFiles() {
   }
 }
 
+// Large files API and rendering
+async function fetchLargeFiles(threshold) {
+  const res = await fetch(`/api/large-files?threshold=${threshold}`);
+  if (!res.ok) {
+    throw new Error('Failed to scan files');
+  }
+  return res.json();
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderLargeFiles(data) {
+  const results = document.getElementById('large-files-results');
+
+  if (data.files.length === 0) {
+    results.innerHTML = `<div class="large-files-summary">No files found with ${data.threshold}+ lines (scanned ${data.scanned} files in ${data.duration}ms)</div>`;
+    return;
+  }
+
+  let html = `<div class="large-files-summary">Found ${data.files.length} file${data.files.length === 1 ? '' : 's'} with ${data.threshold}+ lines (scanned ${data.scanned} files in ${data.duration}ms)</div>`;
+  html += '<table class="large-files-table"><thead><tr><th>File</th><th>Lines</th><th>Size</th></tr></thead><tbody>';
+
+  for (const file of data.files) {
+    html += `<tr>
+      <td class="file-path">${escapeHtml(file.path)}</td>
+      <td class="file-lines">${file.lines.toLocaleString()}</td>
+      <td class="file-size">${formatBytes(file.bytes)}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  results.innerHTML = html;
+}
+
+async function loadLargeFiles() {
+  const results = document.getElementById('large-files-results');
+  const threshold = parseInt(document.getElementById('threshold-input').value) || 500;
+
+  results.innerHTML = '<div class="large-files-loading">Scanning files...</div>';
+
+  try {
+    largeFilesData = await fetchLargeFiles(threshold);
+    renderLargeFiles(largeFilesData);
+  } catch (err) {
+    results.innerHTML = '<div class="large-files-error">Failed to scan files</div>';
+    console.error('Error scanning large files:', err);
+  }
+}
+
 function switchView(view) {
   if (currentView === 'config' && configModified && view !== 'config') {
     const discard = confirm('You have unsaved changes. Discard them?');
@@ -466,6 +520,7 @@ function switchView(view) {
   document.getElementById('terminal-area').style.display = view === 'sessions' ? 'flex' : 'none';
   document.getElementById('extensions-area').style.display = view === 'extensions' ? 'flex' : 'none';
   document.getElementById('config-area').style.display = view === 'config' ? 'flex' : 'none';
+  document.getElementById('large-files-area').style.display = view === 'large-files' ? 'flex' : 'none';
 
   if (view === 'extensions' && !extensionsData) {
     loadExtensions();
@@ -473,6 +528,10 @@ function switchView(view) {
 
   if (view === 'config' && !configFilesData) {
     loadConfigFiles();
+  }
+
+  if (view === 'large-files' && !largeFilesData) {
+    loadLargeFiles();
   }
 }
 
@@ -682,6 +741,12 @@ document.getElementById('refresh-extensions-btn').addEventListener('click', () =
 document.getElementById('config-editor').addEventListener('input', handleConfigInput);
 document.getElementById('save-config-btn').addEventListener('click', handleConfigSave);
 document.getElementById('discard-config-btn').addEventListener('click', handleConfigDiscard);
+
+// Large files event listeners
+document.getElementById('scan-large-files-btn').addEventListener('click', () => {
+  largeFilesData = null;
+  loadLargeFiles();
+});
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

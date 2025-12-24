@@ -1,12 +1,17 @@
 const express = require('express');
 const http = require('http');
 const fs = require('fs');
+const readline = require('readline');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PtyManager } = require('./pty-manager.js');
 const { loadTasks, saveTasks } = require('./task-store.js');
 const { scanExtensions } = require('./extension-scanner.js');
+
+// Large files scanner configuration
+const IGNORE_DIRS = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__pycache__', '.venv', '.cache', 'vendor'];
+const BINARY_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.tar', '.gz', '.exe', '.dll', '.so', '.dylib', '.woff', '.woff2', '.ttf', '.eot', '.mp3', '.mp4', '.wav', '.avi', '.mov'];
 
 const ptyManager = new PtyManager();
 
@@ -318,6 +323,93 @@ function startServer(port) {
       } catch (err) {
         console.error('Error writing config file:', err);
         res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Large files scanner functions
+    const countLines = (filePath) => {
+      return new Promise((resolve, reject) => {
+        let count = 0;
+        const stream = fs.createReadStream(filePath);
+        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+        rl.on('line', () => count++);
+        rl.on('close', () => resolve(count));
+        rl.on('error', reject);
+        stream.on('error', reject);
+      });
+    };
+
+    const scanLargeFiles = async (cwd, threshold) => {
+      const startTime = Date.now();
+      const largeFiles = [];
+      let scannedCount = 0;
+
+      const scan = async (dir) => {
+        let entries;
+        try {
+          entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        } catch (err) {
+          return; // Skip directories we can't read
+        }
+
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          const relativePath = path.relative(cwd, fullPath);
+
+          if (entry.isDirectory()) {
+            if (!IGNORE_DIRS.includes(entry.name)) {
+              await scan(fullPath);
+            }
+            continue;
+          }
+
+          // Skip binary files
+          const ext = path.extname(entry.name).toLowerCase();
+          if (BINARY_EXTS.includes(ext)) continue;
+
+          // Count lines
+          try {
+            scannedCount++;
+            const stats = await fs.promises.stat(fullPath);
+            const lines = await countLines(fullPath);
+
+            if (lines >= threshold) {
+              largeFiles.push({
+                path: relativePath,
+                lines,
+                bytes: stats.size
+              });
+            }
+          } catch (err) {
+            // Skip files we can't read
+          }
+        }
+      };
+
+      await scan(cwd);
+
+      // Sort by line count descending
+      largeFiles.sort((a, b) => b.lines - a.lines);
+
+      return {
+        threshold,
+        cwd,
+        files: largeFiles,
+        scanned: scannedCount,
+        duration: Date.now() - startTime
+      };
+    };
+
+    // Large files API endpoint
+    app.get('/api/large-files', async (req, res) => {
+      const threshold = parseInt(req.query.threshold) || 500;
+      try {
+        const result = await scanLargeFiles(process.cwd(), threshold);
+        res.json(result);
+      } catch (err) {
+        console.error('Large files scan error:', err);
+        res.status(500).json({ error: 'Scan failed' });
       }
     });
 
