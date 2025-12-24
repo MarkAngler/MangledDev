@@ -2,7 +2,9 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 const { PtyManager } = require('./pty-manager.js');
+const { loadTasks, saveTasks } = require('./task-store.js');
 
 const ptyManager = new PtyManager();
 
@@ -62,6 +64,89 @@ function startServer(port) {
       } else {
         res.status(404).json({ error: 'Session not found or not running' });
       }
+    });
+
+    // Task API endpoints
+    let tasks = loadTasks();
+
+    app.get('/api/tasks', (req, res) => {
+      res.json(tasks);
+    });
+
+    app.post('/api/tasks', (req, res) => {
+      const { title, priority, dueDate } = req.body;
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: 'Title is required' });
+      }
+
+      const task = {
+        id: uuidv4(),
+        title: title.trim(),
+        completed: false,
+        priority: priority || 'medium',
+        dueDate: dueDate || null,
+        order: tasks.length,
+        createdAt: new Date().toISOString()
+      };
+
+      tasks.push(task);
+      saveTasks(tasks);
+      res.status(201).json(task);
+    });
+
+    app.put('/api/tasks/:id', (req, res) => {
+      const task = tasks.find(t => t.id === req.params.id);
+      if (!task) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      const { title, completed, priority, dueDate } = req.body;
+      if (title !== undefined) task.title = title.trim();
+      if (completed !== undefined) task.completed = completed;
+      if (priority !== undefined) task.priority = priority;
+      if (dueDate !== undefined) task.dueDate = dueDate;
+
+      saveTasks(tasks);
+      res.json(task);
+    });
+
+    app.delete('/api/tasks/:id', (req, res) => {
+      const index = tasks.findIndex(t => t.id === req.params.id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      tasks.splice(index, 1);
+      tasks.forEach((t, i) => t.order = i);
+      saveTasks(tasks);
+      res.status(204).end();
+    });
+
+    app.post('/api/tasks/reorder', (req, res) => {
+      const { taskIds } = req.body;
+      if (!Array.isArray(taskIds)) {
+        return res.status(400).json({ error: 'taskIds array required' });
+      }
+
+      const reordered = [];
+      for (const id of taskIds) {
+        const task = tasks.find(t => t.id === id);
+        if (task) {
+          task.order = reordered.length;
+          reordered.push(task);
+        }
+      }
+
+      for (const task of tasks) {
+        if (!reordered.includes(task)) {
+          task.order = reordered.length;
+          reordered.push(task);
+        }
+      }
+
+      tasks = reordered;
+      saveTasks(tasks);
+      res.json(tasks);
     });
 
     const server = http.createServer(app);

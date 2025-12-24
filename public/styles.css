@@ -232,6 +232,199 @@ dialog input:focus {
   color: #fff;
 }
 
-#create-session-btn:hover {
+#create-session-btn:hover,
+#save-task-btn:hover {
   background: #1177bb;
+}
+
+/* Task Panel */
+#task-panel {
+  border-top: 1px solid #3c3c3c;
+}
+
+#task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #2a2d2e;
+}
+
+#task-toggle-btn {
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#task-toggle-btn:hover {
+  color: #fff;
+}
+
+#task-toggle-icon {
+  transition: transform 0.2s;
+}
+
+#task-toggle-icon.collapsed {
+  transform: rotate(-90deg);
+}
+
+#new-task-btn {
+  background: #0e639c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+#new-task-btn:hover {
+  background: #1177bb;
+}
+
+#task-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+#task-list.collapsed {
+  display: none;
+}
+
+/* Task Items */
+.task-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 16px;
+  gap: 8px;
+}
+
+.task-item:hover {
+  background: #2a2d2e;
+}
+
+.task-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #0e639c;
+}
+
+.task-title {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.task-title:hover {
+  text-decoration: underline;
+}
+
+.task-item.completed .task-title {
+  text-decoration: line-through;
+  color: #6c6c6c;
+}
+
+.task-priority {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.priority-low {
+  background: #3c3c3c;
+  color: #888;
+}
+
+.priority-medium {
+  background: #4a4a00;
+  color: #dcdcaa;
+}
+
+.priority-high {
+  background: #4a0000;
+  color: #f14c4c;
+}
+
+.task-due {
+  font-size: 11px;
+  color: #888;
+}
+
+.task-due.overdue {
+  color: #f14c4c;
+}
+
+.task-controls {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+}
+
+.task-item:hover .task-controls {
+  opacity: 1;
+}
+
+.task-move-btn,
+.task-delete-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+}
+
+.task-move-btn:hover {
+  color: #ccc;
+}
+
+.task-move-btn:disabled {
+  color: #444;
+  cursor: default;
+}
+
+.task-delete-btn:hover {
+  color: #f14c4c;
+}
+
+/* Task Dialog */
+#task-dialog select,
+#task-dialog input[type="date"] {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #3c3c3c;
+  border: 1px solid #5c5c5c;
+  border-radius: 4px;
+  color: #d4d4d4;
+  font-size: 14px;
+}
+
+#task-dialog select:focus,
+#task-dialog input[type="date"]:focus {
+  outline: none;
+  border-color: #0e639c;
+}
+
+#save-task-btn {
+  background: #0e639c;
+  color: #fff;
+}
+
+#cancel-task-btn {
+  background: #3c3c3c;
+  color: #ccc;
 }

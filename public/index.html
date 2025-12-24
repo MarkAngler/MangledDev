@@ -15,6 +15,13 @@
         <button id="new-session-btn">+ New Session</button>
       </div>
       <div id="session-list"></div>
+      <div id="task-panel">
+        <div id="task-header">
+          <button id="task-toggle-btn"><span id="task-toggle-icon">&#9662;</span> Tasks</button>
+          <button id="new-task-btn" title="Add Task">+</button>
+        </div>
+        <div id="task-list"></div>
+      </div>
     </aside>
     <main id="terminal-area">
       <div id="terminal-header">
@@ -38,6 +45,32 @@
       <div id="dialog-buttons">
         <button type="button" id="cancel-dialog-btn">Cancel</button>
         <button type="submit" id="create-session-btn">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="task-dialog">
+    <form method="dialog">
+      <h2 id="task-dialog-title">New Task</h2>
+      <label>
+        Title:
+        <input type="text" id="task-title-input" required>
+      </label>
+      <label>
+        Priority:
+        <select id="task-priority-input">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </label>
+      <label>
+        Due Date (optional):
+        <input type="date" id="task-due-input">
+      </label>
+      <div id="dialog-buttons">
+        <button type="button" id="cancel-task-btn">Cancel</button>
+        <button type="submit" id="save-task-btn">Save</button>
       </div>
     </form>
   </dialog>

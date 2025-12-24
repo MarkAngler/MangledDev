@@ -2,6 +2,8 @@ let terminal = null;
 let fitAddon = null;
 let currentWs = null;
 let currentSessionId = null;
+let taskPanelCollapsed = false;
+let editingTaskId = null;
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -67,6 +69,142 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// Task API
+async function fetchTasks() {
+  const res = await fetch('/api/tasks');
+  return res.json();
+}
+
+async function createTask(title, priority, dueDate) {
+  const res = await fetch('/api/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, priority, dueDate: dueDate || null })
+  });
+  return res.json();
+}
+
+async function updateTask(id, updates) {
+  const res = await fetch(`/api/tasks/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates)
+  });
+  return res.json();
+}
+
+async function deleteTask(id) {
+  await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+}
+
+async function reorderTasks(taskIds) {
+  const res = await fetch('/api/tasks/reorder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskIds })
+  });
+  return res.json();
+}
+
+function formatDueDate(dateStr) {
+  const date = new Date(dateStr + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const taskDate = new Date(dateStr + 'T00:00:00');
+  taskDate.setHours(0, 0, 0, 0);
+
+  if (taskDate.getTime() === today.getTime()) return 'Today';
+  if (taskDate.getTime() === tomorrow.getTime()) return 'Tomorrow';
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function renderTaskList(tasks) {
+  const list = document.getElementById('task-list');
+  list.innerHTML = '';
+
+  const sorted = [...tasks].sort((a, b) => a.order - b.order);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const task = sorted[i];
+    const item = document.createElement('div');
+    item.className = 'task-item' + (task.completed ? ' completed' : '');
+    item.dataset.id = task.id;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isOverdue = task.dueDate && new Date(task.dueDate + 'T00:00:00') < today && !task.completed;
+    const dueDateStr = task.dueDate ? formatDueDate(task.dueDate) : '';
+
+    item.innerHTML = `
+      <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
+      <span class="task-title">${escapeHtml(task.title)}</span>
+      <span class="task-priority priority-${task.priority}">${task.priority}</span>
+      ${dueDateStr ? `<span class="task-due ${isOverdue ? 'overdue' : ''}">${dueDateStr}</span>` : ''}
+      <div class="task-controls">
+        <button class="task-move-btn" data-dir="up" title="Move Up" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
+        <button class="task-move-btn" data-dir="down" title="Move Down" ${i === sorted.length - 1 ? 'disabled' : ''}>&#9660;</button>
+        <button class="task-delete-btn" title="Delete">&times;</button>
+      </div>
+    `;
+
+    item.querySelector('.task-checkbox').addEventListener('change', async (e) => {
+      await updateTask(task.id, { completed: e.target.checked });
+      refreshTasks();
+    });
+
+    item.querySelector('.task-title').addEventListener('click', () => {
+      openTaskDialog(task);
+    });
+
+    item.querySelectorAll('.task-move-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const dir = btn.dataset.dir;
+        await moveTask(task.id, dir, sorted);
+      });
+    });
+
+    item.querySelector('.task-delete-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await deleteTask(task.id);
+      refreshTasks();
+    });
+
+    list.appendChild(item);
+  }
+}
+
+async function moveTask(taskId, direction, sortedTasks) {
+  const currentIndex = sortedTasks.findIndex(t => t.id === taskId);
+  const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+
+  if (newIndex < 0 || newIndex >= sortedTasks.length) return;
+
+  const ids = sortedTasks.map(t => t.id);
+  [ids[currentIndex], ids[newIndex]] = [ids[newIndex], ids[currentIndex]];
+
+  await reorderTasks(ids);
+  refreshTasks();
+}
+
+function openTaskDialog(task = null) {
+  editingTaskId = task ? task.id : null;
+  document.getElementById('task-dialog-title').textContent = task ? 'Edit Task' : 'New Task';
+  document.getElementById('task-title-input').value = task ? task.title : '';
+  document.getElementById('task-priority-input').value = task ? task.priority : 'medium';
+  document.getElementById('task-due-input').value = task && task.dueDate ? task.dueDate : '';
+  document.getElementById('task-dialog').showModal();
+}
+
+async function refreshTasks() {
+  const tasks = await fetchTasks();
+  renderTaskList(tasks);
 }
 
 function initTerminal() {
@@ -206,6 +344,40 @@ document.getElementById('stop-btn').addEventListener('click', async () => {
   refreshSessions();
 });
 
+// Task event listeners
+document.getElementById('task-toggle-btn').addEventListener('click', () => {
+  taskPanelCollapsed = !taskPanelCollapsed;
+  document.getElementById('task-list').classList.toggle('collapsed', taskPanelCollapsed);
+  document.getElementById('task-toggle-icon').classList.toggle('collapsed', taskPanelCollapsed);
+});
+
+document.getElementById('new-task-btn').addEventListener('click', () => {
+  openTaskDialog();
+});
+
+document.getElementById('cancel-task-btn').addEventListener('click', () => {
+  document.getElementById('task-dialog').close('cancel');
+});
+
+document.getElementById('task-dialog').addEventListener('close', async () => {
+  if (document.getElementById('task-dialog').returnValue === 'cancel') return;
+
+  const title = document.getElementById('task-title-input').value.trim();
+  const priority = document.getElementById('task-priority-input').value;
+  const dueDate = document.getElementById('task-due-input').value || null;
+
+  if (!title) return;
+
+  if (editingTaskId) {
+    await updateTask(editingTaskId, { title, priority, dueDate });
+  } else {
+    await createTask(title, priority, dueDate);
+  }
+
+  editingTaskId = null;
+  refreshTasks();
+});
+
 window.addEventListener('resize', () => {
   if (fitAddon) {
     fitAddon.fit();
@@ -216,4 +388,5 @@ window.addEventListener('resize', () => {
 document.addEventListener('DOMContentLoaded', () => {
   initTerminal();
   refreshSessions();
+  refreshTasks();
 });
