@@ -1,0 +1,29 @@
+{
+  "name": "mangleddev",
+  "version": "0.0.1",
+  "description": "Web-based terminal manager for Claude Code instances",
+  "main": "src/server.js",
+  "bin": {
+    "mangleddev": "./bin/mangleddev.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/"
+  ],
+  "scripts": {
+    "start": "node bin/mangleddev.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "node-pty": "^1.0.0",
+    "uuid": "^11.0.3",
+    "ws": "^8.18.0"
+  }
+}
