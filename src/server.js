@@ -5,6 +5,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PtyManager } = require('./pty-manager.js');
 const { loadTasks, saveTasks } = require('./task-store.js');
+const { scanExtensions } = require('./extension-scanner.js');
 
 const ptyManager = new PtyManager();
 
@@ -147,6 +148,18 @@ function startServer(port) {
       tasks = reordered;
       saveTasks(tasks);
       res.json(tasks);
+    });
+
+    // Extensions API endpoint
+    app.get('/api/extensions', (req, res) => {
+      try {
+        const cwd = req.query.cwd || process.cwd();
+        const extensions = scanExtensions(cwd);
+        res.json(extensions);
+      } catch (err) {
+        console.error('Error scanning extensions:', err);
+        res.status(500).json({ error: err.message });
+      }
     });
 
     const server = http.createServer(app);

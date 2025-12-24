@@ -4,6 +4,8 @@ let currentWs = null;
 let currentSessionId = null;
 let taskPanelCollapsed = false;
 let editingTaskId = null;
+let currentView = 'sessions';
+let extensionsData = null;
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -207,6 +209,147 @@ async function refreshTasks() {
   renderTaskList(tasks);
 }
 
+// Extensions API and rendering
+async function fetchExtensions() {
+  const res = await fetch('/api/extensions');
+  return res.json();
+}
+
+function renderExtensions(data) {
+  const grid = document.getElementById('extensions-grid');
+  const loading = document.getElementById('extensions-loading');
+
+  loading.style.display = 'none';
+  grid.innerHTML = '';
+
+  const scopes = [
+    { key: 'personal', title: 'Personal (~/.claude/)' },
+    { key: 'project', title: 'Project (.claude/)' }
+  ];
+
+  const categories = [
+    { key: 'plugins', name: 'Plugins' },
+    { key: 'skills', name: 'Skills' },
+    { key: 'agents', name: 'Agents' },
+    { key: 'commands', name: 'Commands' },
+    { key: 'mcpServers', name: 'MCP Servers' },
+    { key: 'hooks', name: 'Hooks' }
+  ];
+
+  let hasAnyData = false;
+
+  for (const scope of scopes) {
+    const scopeData = data[scope.key];
+    const hasAny = categories.some(c => scopeData[c.key]?.length > 0);
+    if (!hasAny) continue;
+
+    hasAnyData = true;
+
+    const scopeEl = document.createElement('div');
+    scopeEl.className = 'extensions-scope';
+    scopeEl.innerHTML = `<div class="scope-title">${escapeHtml(scope.title)}</div>`;
+
+    for (const cat of categories) {
+      const items = scopeData[cat.key] || [];
+      if (items.length === 0) continue;
+      const catEl = renderCategory(cat, items);
+      scopeEl.appendChild(catEl);
+    }
+
+    grid.appendChild(scopeEl);
+  }
+
+  if (!hasAnyData) {
+    grid.innerHTML = '<div class="empty-category">No Claude Code extensions found</div>';
+  }
+}
+
+function renderCategory(category, items) {
+  const catEl = document.createElement('div');
+  catEl.className = 'extensions-category';
+
+  const header = document.createElement('div');
+  header.className = 'category-header';
+  header.innerHTML = `
+    <span class="category-name">${escapeHtml(category.name)}</span>
+    <span class="category-count">${items.length}</span>
+    <span class="category-chevron">&#9662;</span>
+  `;
+
+  const list = document.createElement('div');
+  list.className = 'extensions-list';
+
+  for (const item of items) {
+    list.appendChild(renderExtensionItem(category.key, item));
+  }
+
+  header.addEventListener('click', () => {
+    header.classList.toggle('collapsed');
+    list.classList.toggle('collapsed');
+  });
+
+  catEl.appendChild(header);
+  catEl.appendChild(list);
+  return catEl;
+}
+
+function renderExtensionItem(type, item) {
+  const el = document.createElement('div');
+  el.className = 'extension-item';
+
+  let html = `<div class="extension-name">${escapeHtml(item.name || 'Unnamed')}</div>`;
+
+  if (item.version) {
+    html += `<div class="extension-meta">v${escapeHtml(item.version)}</div>`;
+  }
+  if (item.marketplace) {
+    html += `<div class="extension-meta">${escapeHtml(item.marketplace)}</div>`;
+  }
+  if (item.source && item.source !== 'project' && item.source !== 'personal') {
+    html += `<div class="extension-meta">From: ${escapeHtml(item.source)}</div>`;
+  }
+  if (item.type) {
+    html += `<div class="extension-meta">Type: ${escapeHtml(item.type)}</div>`;
+  }
+  if (item.event) {
+    html += `<div class="extension-meta">Event: ${escapeHtml(item.event)}</div>`;
+  }
+  if (item.description) {
+    html += `<div class="extension-description">${escapeHtml(item.description)}</div>`;
+  }
+
+  el.innerHTML = html;
+  return el;
+}
+
+function switchView(view) {
+  currentView = view;
+
+  document.querySelectorAll('.view-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.view === view);
+  });
+
+  document.getElementById('terminal-area').style.display = view === 'sessions' ? 'flex' : 'none';
+  document.getElementById('extensions-area').style.display = view === 'extensions' ? 'flex' : 'none';
+
+  if (view === 'extensions' && !extensionsData) {
+    loadExtensions();
+  }
+}
+
+async function loadExtensions() {
+  document.getElementById('extensions-loading').style.display = 'block';
+  document.getElementById('extensions-grid').innerHTML = '';
+
+  try {
+    extensionsData = await fetchExtensions();
+    renderExtensions(extensionsData);
+  } catch (err) {
+    document.getElementById('extensions-loading').textContent = 'Failed to load extensions';
+    console.error('Error loading extensions:', err);
+  }
+}
+
 function initTerminal() {
   const container = document.getElementById('terminal-container');
   container.innerHTML = '';
@@ -382,6 +525,16 @@ window.addEventListener('resize', () => {
   if (fitAddon) {
     fitAddon.fit();
   }
+});
+
+// View tab event listeners
+document.querySelectorAll('.view-tab').forEach(tab => {
+  tab.addEventListener('click', () => switchView(tab.dataset.view));
+});
+
+document.getElementById('refresh-extensions-btn').addEventListener('click', () => {
+  extensionsData = null;
+  loadExtensions();
 });
 
 // Initialize when DOM is ready

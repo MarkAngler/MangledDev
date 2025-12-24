@@ -12,6 +12,10 @@
     <aside id="sidebar">
       <div id="header">
         <h1>MangledDev</h1>
+        <div id="view-tabs">
+          <button class="view-tab active" data-view="sessions">Sessions</button>
+          <button class="view-tab" data-view="extensions">Extensions</button>
+        </div>
         <button id="new-session-btn">+ New Session</button>
       </div>
       <div id="session-list"></div>
@@ -32,6 +36,16 @@
         </div>
       </div>
       <div id="terminal-container"></div>
+    </main>
+    <main id="extensions-area" style="display: none;">
+      <div id="extensions-header">
+        <h2>Claude Code Extensions</h2>
+        <button id="refresh-extensions-btn">Refresh</button>
+      </div>
+      <div id="extensions-content">
+        <div id="extensions-loading">Loading extensions...</div>
+        <div id="extensions-grid"></div>
+      </div>
     </main>
   </div>
 
