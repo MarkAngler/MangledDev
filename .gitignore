@@ -31,3 +31,4 @@ yarn-error.log*
 coverage/
 dist/
 build/
+publish.sh
