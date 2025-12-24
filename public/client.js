@@ -181,11 +181,11 @@ document.getElementById('new-session-btn').addEventListener('click', () => {
 });
 
 document.getElementById('cancel-dialog-btn').addEventListener('click', () => {
-  document.getElementById('new-session-dialog').close();
+  document.getElementById('new-session-dialog').close('cancel');
 });
 
 document.getElementById('new-session-dialog').addEventListener('close', async () => {
-  if (document.getElementById('new-session-dialog').returnValue === '') return;
+  if (document.getElementById('new-session-dialog').returnValue === 'cancel') return;
 
   const name = document.getElementById('session-name-input').value.trim();
   const session = await createSession(name || undefined);
