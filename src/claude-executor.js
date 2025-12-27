@@ -31,6 +31,11 @@ async function executePrompt(prompt, options = {}) {
 
     args.push(prompt);
 
+    const promptPreview = prompt.substring(0, 100).replace(/\n/g, ' ');
+    console.log(`[claude-executor] Starting: claude ${args.slice(0, -1).join(' ')} "${promptPreview}..."`);
+    console.log(`[claude-executor] Timeout: ${timeout}ms`);
+    const startTime = Date.now();
+
     const proc = spawn('claude', args, {
       cwd,
       env: { ...process.env },
@@ -39,6 +44,7 @@ async function executePrompt(prompt, options = {}) {
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -49,14 +55,23 @@ async function executePrompt(prompt, options = {}) {
     });
 
     const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.log(`[claude-executor] TIMEOUT after ${timeout}ms`);
       proc.kill('SIGTERM');
       reject(new Error(`Command timed out after ${timeout}ms`));
     }, timeout);
 
     proc.on('close', (code) => {
       clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[claude-executor] Completed with exit code ${code} in ${elapsed}ms`);
 
       if (code !== 0) {
+        console.log(`[claude-executor] Error: ${stderr.substring(0, 200)}`);
         reject(new Error(`claude exited with code ${code}: ${stderr}`));
         return;
       }
@@ -77,6 +92,9 @@ async function executePrompt(prompt, options = {}) {
 
     proc.on('error', (err) => {
       clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+      console.log(`[claude-executor] Spawn error: ${err.message}`);
       reject(new Error(`Failed to spawn claude: ${err.message}`));
     });
   });

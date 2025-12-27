@@ -22,6 +22,19 @@ let behaviorsData = null;
 let currentEvalView = 'list';
 let evaluationPollingInterval = null;
 
+// Safe terminal fit that ensures integer dimensions
+function safeTerminalFit() {
+  if (!fitAddon || !terminal) return;
+  try {
+    const dims = fitAddon.proposeDimensions();
+    if (dims && dims.cols > 0 && dims.rows > 0) {
+      terminal.resize(Math.floor(dims.cols), Math.floor(dims.rows));
+    }
+  } catch (e) {
+    // Ignore errors when terminal not ready
+  }
+}
+
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
   return res.json();
@@ -651,11 +664,7 @@ function toggleWorkflowPanel() {
   }
 
   // Resize terminal when panel toggles
-  setTimeout(() => {
-    if (fitAddon) {
-      fitAddon.fit();
-    }
-  }, 50);
+  setTimeout(safeTerminalFit, 50);
 }
 
 async function refreshWorkflows() {
@@ -789,7 +798,7 @@ function initTerminal() {
   fitAddon = new FitAddon.FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(container);
-  fitAddon.fit();
+  safeTerminalFit();
 
   terminal.onData((data) => {
     if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -844,7 +853,7 @@ function connectToSession(sessionId, sessionName) {
   currentWs = new WebSocket(wsUrl);
 
   currentWs.onopen = () => {
-    fitAddon.fit();
+    safeTerminalFit();
     currentWs.send(JSON.stringify({
       type: 'resize',
       cols: terminal.cols,
@@ -945,11 +954,7 @@ document.getElementById('task-dialog').addEventListener('close', async () => {
   refreshTasks();
 });
 
-window.addEventListener('resize', () => {
-  if (fitAddon) {
-    fitAddon.fit();
-  }
-});
+window.addEventListener('resize', safeTerminalFit);
 
 // View tab event listeners
 document.querySelectorAll('.view-tab').forEach(tab => {

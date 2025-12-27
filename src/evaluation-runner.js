@@ -48,6 +48,7 @@ async function runUnderstanding(evaluationId) {
   const evaluation = getEvaluation(evaluationId);
   if (!evaluation) throw new Error('Evaluation not found');
 
+  console.log(`[evaluation] Stage: Understanding - starting for behavior "${evaluation.behaviorKey}"`);
   updateStage(evaluationId, 'understanding', { status: 'running', startedAt: new Date().toISOString() });
 
   const behaviors = getBehaviors();
@@ -60,8 +61,9 @@ async function runUnderstanding(evaluationId) {
   });
 
   try {
-    const result = await executeJsonPrompt(prompt, { timeout: 60000 });
+    const result = await executeJsonPrompt(prompt, { timeout: 120000 });
 
+    console.log(`[evaluation] Stage: Understanding - completed`);
     updateStage(evaluationId, 'understanding', {
       status: 'completed',
       completedAt: new Date().toISOString(),
@@ -70,6 +72,7 @@ async function runUnderstanding(evaluationId) {
 
     return result;
   } catch (err) {
+    console.log(`[evaluation] Stage: Understanding - error: ${err.message}`);
     updateStage(evaluationId, 'understanding', {
       status: 'error',
       error: err.message
@@ -89,6 +92,7 @@ async function runIdeation(evaluationId, understanding) {
   const numScenarios = evaluation.config?.numScenarios || tierConfig.numScenarios;
   const diversity = evaluation.config?.diversity || 0.5;
 
+  console.log(`[evaluation] Stage: Ideation - generating ${numScenarios} scenarios`);
   updateStage(evaluationId, 'ideation', { status: 'running', startedAt: new Date().toISOString() });
 
   const prompt = fillTemplate(IDEATION_PROMPT, {
@@ -98,9 +102,10 @@ async function runIdeation(evaluationId, understanding) {
   });
 
   try {
-    const result = await executeJsonPrompt(prompt, { timeout: 120000 });
+    const result = await executeJsonPrompt(prompt, { timeout: 180000 });
     const scenarios = result.scenarios || [];
 
+    console.log(`[evaluation] Stage: Ideation - completed with ${scenarios.length} scenarios`);
     updateStage(evaluationId, 'ideation', {
       status: 'completed',
       completedAt: new Date().toISOString(),
@@ -110,6 +115,7 @@ async function runIdeation(evaluationId, understanding) {
 
     return scenarios;
   } catch (err) {
+    console.log(`[evaluation] Stage: Ideation - error: ${err.message}`);
     updateStage(evaluationId, 'ideation', {
       status: 'error',
       error: err.message
@@ -257,7 +263,7 @@ async function decideNextAction(transcript, scenario, understanding) {
   });
 
   try {
-    return await executeJsonPrompt(prompt, { timeout: 30000 });
+    return await executeJsonPrompt(prompt, { timeout: 60000 });
   } catch (err) {
     return { action: 'complete', reason: 'Evaluator error: ' + err.message };
   }
@@ -274,6 +280,7 @@ async function runRollout(evaluationId, scenarios, understanding) {
   const maxTurns = evaluation.config?.maxTurns || tierConfig.maxTurns;
   const promptConfig = evaluation.promptConfig || {};
 
+  console.log(`[evaluation] Stage: Rollout - processing ${scenarios.length} scenarios (maxTurns: ${maxTurns})`);
   updateStage(evaluationId, 'rollout', {
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -313,12 +320,15 @@ async function runRollout(evaluationId, scenarios, understanding) {
     }
 
     // Update progress
+    const completedCount = Math.min(i + maxConcurrent, scenarios.length);
+    console.log(`[evaluation] Rollout progress: ${completedCount}/${scenarios.length}`);
     updateStage(evaluationId, 'rollout', {
-      completed: Math.min(i + maxConcurrent, scenarios.length),
+      completed: completedCount,
       total: scenarios.length
     });
   }
 
+  console.log(`[evaluation] Stage: Rollout - completed`);
   updateStage(evaluationId, 'rollout', {
     status: 'completed',
     completedAt: new Date().toISOString(),
@@ -345,7 +355,7 @@ async function judgeSingleTranscript(transcriptData, behavior, understanding) {
     transcript: transcriptText
   });
 
-  return executeJsonPrompt(prompt, { timeout: 60000 });
+  return executeJsonPrompt(prompt, { timeout: 120000 });
 }
 
 /**
@@ -362,6 +372,7 @@ async function runJudgment(evaluationId, transcripts, understanding) {
   const tierConfig = getTierConfig(evaluation.config?.tier);
   const numJudges = evaluation.config?.numJudges || tierConfig.numJudges;
 
+  console.log(`[evaluation] Stage: Judgment - scoring ${transcripts.length} transcripts with ${numJudges} judge(s)`);
   updateStage(evaluationId, 'judgment', {
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -419,12 +430,14 @@ async function runJudgment(evaluationId, transcripts, understanding) {
       });
     }
 
+    console.log(`[evaluation] Judgment progress: ${i + 1}/${transcripts.length}`);
     updateStage(evaluationId, 'judgment', {
       completed: i + 1,
       total: transcripts.length
     });
   }
 
+  console.log(`[evaluation] Stage: Judgment - completed`);
   // Calculate aggregate results
   const validScores = judgments.filter(j => typeof j.score === 'number').map(j => j.score);
   const results = {
@@ -463,6 +476,9 @@ async function runEvaluation(evaluationId) {
   const evaluation = getEvaluation(evaluationId);
   if (!evaluation) throw new Error('Evaluation not found');
 
+  console.log(`[evaluation] Starting evaluation ${evaluationId} for behavior "${evaluation.behaviorKey}"`);
+  console.log(`[evaluation] Config: tier=${evaluation.config?.tier || 'standard'}`);
+
   // Store in active runs for progress tracking
   activeRuns.set(evaluationId, { startedAt: new Date().toISOString() });
 
@@ -484,9 +500,12 @@ async function runEvaluation(evaluationId) {
     // Stage 4: Judgment
     const { judgments, results } = await runJudgment(evaluationId, transcripts, understanding);
 
+    console.log(`[evaluation] Evaluation ${evaluationId} completed successfully`);
+    console.log(`[evaluation] Overall score: ${results.overallScore?.toFixed(2) || 'N/A'}`);
     activeRuns.delete(evaluationId);
     return { success: true, results };
   } catch (err) {
+    console.log(`[evaluation] Evaluation ${evaluationId} failed: ${err.message}`);
     activeRuns.delete(evaluationId);
     updateEvaluation(evaluationId, {
       status: 'error',
