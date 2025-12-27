@@ -19,7 +19,7 @@ async function executePrompt(prompt, options = {}) {
   } = options;
 
   return new Promise((resolve, reject) => {
-    const args = ['-p', '--max-turns', '1'];
+    const args = ['-p'];
 
     if (jsonOutput) {
       args.push('--output-format', 'json');
@@ -38,9 +38,12 @@ async function executePrompt(prompt, options = {}) {
 
     const proc = spawn('claude', args, {
       cwd,
-      env: { ...process.env },
-      timeout
+      env: { ...process.env }
     });
+
+    // Close stdin immediately - we're not sending input, and leaving it open
+    // causes the Claude CLI to hang waiting for EOF
+    proc.stdin.end();
 
     let stdout = '';
     let stderr = '';
