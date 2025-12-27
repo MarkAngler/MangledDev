@@ -1058,6 +1058,10 @@ async function runComparison(id) {
   return res.json();
 }
 
+async function deleteComparison(id) {
+  await fetch(`/api/comparisons/${id}`, { method: 'DELETE' });
+}
+
 async function loadEvaluations() {
   try {
     [evaluationsData, comparisonsData, behaviorsData] = await Promise.all([
@@ -1233,6 +1237,7 @@ function renderComparisonsList() {
           <button class="run-comp-btn" ${c.status === 'running' || c.status === 'completed' ? 'disabled' : ''}>
             ${c.status === 'running' ? 'Running...' : c.status === 'completed' ? 'Completed' : 'Run'}
           </button>
+          <button class="delete-eval-btn">Delete</button>
         </div>
       </div>
     `;
@@ -1244,6 +1249,17 @@ function renderComparisonsList() {
       const id = item.dataset.id;
       await runComparison(id);
       await loadEvaluations();
+    });
+  });
+
+  list.querySelectorAll('.delete-eval-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.comparison-item');
+      const id = item.dataset.id;
+      if (confirm('Delete this comparison?')) {
+        await deleteComparison(id);
+        await loadEvaluations();
+      }
     });
   });
 }

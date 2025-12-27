@@ -660,6 +660,19 @@ function startServer(port) {
       res.status(201).json(comparison);
     });
 
+    app.delete('/api/comparisons/:id', (req, res) => {
+      const comparison = evaluationStore.getComparison(req.params.id);
+      if (!comparison) {
+        return res.status(404).json({ error: 'Comparison not found' });
+      }
+      // Delete associated evaluations
+      evaluationStore.deleteEvaluation(comparison.evaluationA);
+      evaluationStore.deleteEvaluation(comparison.evaluationB);
+      // Delete comparison
+      evaluationStore.deleteComparison(req.params.id);
+      res.status(204).send();
+    });
+
     app.post('/api/comparisons/:id/run', async (req, res) => {
       const comparison = evaluationStore.getComparison(req.params.id);
       if (!comparison) {
