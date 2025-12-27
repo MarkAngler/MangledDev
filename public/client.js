@@ -16,6 +16,11 @@ let workflowPanelVisible = false;
 let expandedWorkflows = new Set();
 let editingWorkflowId = null;
 let dialogSteps = [];
+let evaluationsData = null;
+let comparisonsData = null;
+let behaviorsData = null;
+let currentEvalView = 'list';
+let evaluationPollingInterval = null;
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -729,6 +734,7 @@ function switchView(view) {
   });
 
   document.getElementById('terminal-area').style.display = view === 'sessions' ? 'flex' : 'none';
+  document.getElementById('evaluations-area').style.display = view === 'evaluations' ? 'flex' : 'none';
   document.getElementById('extensions-area').style.display = view === 'extensions' ? 'flex' : 'none';
   document.getElementById('config-area').style.display = view === 'config' ? 'flex' : 'none';
   document.getElementById('large-files-area').style.display = view === 'large-files' ? 'flex' : 'none';
@@ -743,6 +749,13 @@ function switchView(view) {
 
   if (view === 'large-files' && !largeFilesData) {
     loadLargeFiles();
+  }
+
+  if (view === 'evaluations') {
+    loadEvaluations();
+    startEvaluationPolling();
+  } else {
+    stopEvaluationPolling();
   }
 }
 
@@ -990,6 +1003,347 @@ document.getElementById('workflow-dialog').addEventListener('close', async () =>
   editingWorkflowId = null;
   dialogSteps = [];
   refreshWorkflows();
+});
+
+// Evaluation API
+async function fetchBehaviors() {
+  const res = await fetch('/api/behaviors');
+  return res.json();
+}
+
+async function fetchEvaluations() {
+  const res = await fetch('/api/evaluations');
+  return res.json();
+}
+
+async function fetchComparisons() {
+  const res = await fetch('/api/comparisons');
+  return res.json();
+}
+
+async function createEvaluation(name, behaviorKey, promptConfig, config) {
+  const res = await fetch('/api/evaluations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, behaviorKey, promptConfig, config })
+  });
+  return res.json();
+}
+
+async function deleteEvaluation(id) {
+  await fetch(`/api/evaluations/${id}`, { method: 'DELETE' });
+}
+
+async function runEvaluation(id) {
+  const res = await fetch(`/api/evaluations/${id}/run`, { method: 'POST' });
+  return res.json();
+}
+
+async function getEvaluationStatus(id) {
+  const res = await fetch(`/api/evaluations/${id}/status`);
+  return res.json();
+}
+
+async function createComparison(name, promptA, promptB, behaviorKey, config) {
+  const res = await fetch('/api/comparisons', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, promptA, promptB, behaviorKey, config })
+  });
+  return res.json();
+}
+
+async function runComparison(id) {
+  const res = await fetch(`/api/comparisons/${id}/run`, { method: 'POST' });
+  return res.json();
+}
+
+async function loadEvaluations() {
+  try {
+    [evaluationsData, comparisonsData, behaviorsData] = await Promise.all([
+      fetchEvaluations(),
+      fetchComparisons(),
+      fetchBehaviors()
+    ]);
+    renderEvaluationsList();
+    renderComparisonsList();
+  } catch (err) {
+    console.error('Error loading evaluations:', err);
+  }
+}
+
+function startEvaluationPolling() {
+  if (evaluationPollingInterval) return;
+  evaluationPollingInterval = setInterval(async () => {
+    if (currentView === 'evaluations') {
+      const hasRunning = evaluationsData?.some(e => e.status === 'running') ||
+                         comparisonsData?.some(c => c.status === 'running');
+      if (hasRunning) {
+        await loadEvaluations();
+      }
+    }
+  }, 3000);
+}
+
+function stopEvaluationPolling() {
+  if (evaluationPollingInterval) {
+    clearInterval(evaluationPollingInterval);
+    evaluationPollingInterval = null;
+  }
+}
+
+function renderEvaluationsList() {
+  const list = document.getElementById('evaluations-list');
+  if (!list) return;
+
+  if (!evaluationsData || evaluationsData.length === 0) {
+    list.innerHTML = '<div style="color: #888; text-align: center; padding: 40px;">No evaluations yet. Create one to get started.</div>';
+    return;
+  }
+
+  list.innerHTML = evaluationsData.map(e => {
+    const stages = e.stages || {};
+    const behavior = behaviorsData?.find(b => b.key === e.behaviorKey);
+
+    return `
+      <div class="evaluation-item" data-id="${e.id}">
+        <div class="evaluation-item-header">
+          <span class="evaluation-name">${escapeHtml(e.name)}</span>
+          <div class="evaluation-meta">
+            <span class="evaluation-status status-${e.status}">${e.status}</span>
+          </div>
+        </div>
+        <div class="evaluation-behavior">Testing: ${behavior?.description || e.behaviorKey}</div>
+        <div class="evaluation-config">Tier: ${e.config?.tier || 'standard'} | Scenarios: ${e.config?.numScenarios || 20}</div>
+        <div class="evaluation-stages">
+          ${renderStageIndicator('Understanding', stages.understanding)}
+          ${renderStageIndicator('Ideation', stages.ideation)}
+          ${renderStageIndicator('Rollout', stages.rollout)}
+          ${renderStageIndicator('Judgment', stages.judgment)}
+        </div>
+        ${e.results ? renderEvaluationResults(e.results) : ''}
+        <div class="evaluation-actions">
+          <button class="run-eval-btn" ${e.status === 'running' || e.status === 'completed' ? 'disabled' : ''}>
+            ${e.status === 'running' ? 'Running...' : e.status === 'completed' ? 'Completed' : 'Run'}
+          </button>
+          <button class="delete-eval-btn">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Add event listeners
+  list.querySelectorAll('.run-eval-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.evaluation-item');
+      const id = item.dataset.id;
+      await runEvaluation(id);
+      await loadEvaluations();
+    });
+  });
+
+  list.querySelectorAll('.delete-eval-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.evaluation-item');
+      const id = item.dataset.id;
+      if (confirm('Delete this evaluation?')) {
+        await deleteEvaluation(id);
+        await loadEvaluations();
+      }
+    });
+  });
+}
+
+function renderStageIndicator(name, stage) {
+  const status = stage?.status || 'pending';
+  let progress = 0;
+  if (status === 'completed') progress = 100;
+  else if (status === 'running' && stage.completed && stage.total) {
+    progress = Math.round((stage.completed / stage.total) * 100);
+  }
+
+  return `
+    <div class="stage-indicator">
+      <div class="stage-bar">
+        <div class="stage-bar-fill ${status}" style="width: ${progress}%"></div>
+      </div>
+      <span class="stage-label">${name}</span>
+    </div>
+  `;
+}
+
+function renderEvaluationResults(results) {
+  if (!results || results.overallScore === null) return '';
+
+  const score = (results.overallScore * 100).toFixed(0);
+  const dist = results.scoreDistribution;
+
+  return `
+    <div class="evaluation-results">
+      <div class="result-score">${score}%</div>
+      ${dist ? `<div class="result-distribution">Range: ${(dist.min * 100).toFixed(0)}% - ${(dist.max * 100).toFixed(0)}% | Std: ${(dist.std * 100).toFixed(1)}%</div>` : ''}
+      ${results.keyQuotes?.length ? `
+        <div class="result-quotes">
+          ${results.keyQuotes.slice(0, 2).map(q => `
+            <div class="result-quote">"${escapeHtml(q.quote || q.explanation || JSON.stringify(q))}"</div>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderComparisonsList() {
+  const list = document.getElementById('comparisons-list');
+  if (!list) return;
+
+  if (!comparisonsData || comparisonsData.length === 0) {
+    list.innerHTML = '<div style="color: #888; text-align: center; padding: 40px;">No A/B comparisons yet.</div>';
+    return;
+  }
+
+  list.innerHTML = comparisonsData.map(c => {
+    const behavior = behaviorsData?.find(b => b.key === c.behaviorKey);
+    const evalA = evaluationsData?.find(e => e.id === c.evaluationA);
+    const evalB = evaluationsData?.find(e => e.id === c.evaluationB);
+
+    return `
+      <div class="comparison-item" data-id="${c.id}">
+        <div class="evaluation-item-header">
+          <span class="evaluation-name">${escapeHtml(c.name)}</span>
+          <span class="evaluation-status status-${c.status}">${c.status}</span>
+        </div>
+        <div class="evaluation-behavior">Testing: ${behavior?.description || c.behaviorKey}</div>
+        ${c.results ? `
+          <div class="comparison-results">
+            <div class="comparison-variant ${c.results.winner === 'A' ? 'winner' : ''}">
+              <div class="variant-label">Variant A</div>
+              <div class="variant-score">${(c.results.scoreA * 100).toFixed(0)}%</div>
+            </div>
+            <div class="comparison-variant ${c.results.winner === 'B' ? 'winner' : ''}">
+              <div class="variant-label">Variant B</div>
+              <div class="variant-score">${(c.results.scoreB * 100).toFixed(0)}%</div>
+            </div>
+          </div>
+          <div style="text-align: center; margin-top: 12px; color: #4caf50; font-weight: 600;">
+            ${c.results.winner === 'tie' ? 'Tie' : `Winner: Variant ${c.results.winner}`}
+          </div>
+        ` : ''}
+        <div class="evaluation-actions" style="margin-top: 12px;">
+          <button class="run-comp-btn" ${c.status === 'running' || c.status === 'completed' ? 'disabled' : ''}>
+            ${c.status === 'running' ? 'Running...' : c.status === 'completed' ? 'Completed' : 'Run'}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.run-comp-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.comparison-item');
+      const id = item.dataset.id;
+      await runComparison(id);
+      await loadEvaluations();
+    });
+  });
+}
+
+function switchEvalView(view) {
+  currentEvalView = view;
+  document.querySelectorAll('.eval-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.evalView === view);
+  });
+  document.getElementById('evaluations-list').style.display = view === 'list' ? 'block' : 'none';
+  document.getElementById('comparisons-list').style.display = view === 'comparisons' ? 'block' : 'none';
+  document.getElementById('evaluation-detail').style.display = 'none';
+}
+
+async function openEvaluationDialog() {
+  if (!behaviorsData) {
+    behaviorsData = await fetchBehaviors();
+  }
+
+  const select = document.getElementById('eval-behavior-input');
+  select.innerHTML = behaviorsData.map(b =>
+    `<option value="${b.key}">${b.key} - ${b.description.substring(0, 50)}...</option>`
+  ).join('');
+
+  document.getElementById('eval-name-input').value = '';
+  document.getElementById('eval-prompt-input').value = '';
+  document.getElementById('eval-tier-input').value = 'standard';
+
+  document.getElementById('evaluation-dialog').showModal();
+}
+
+async function openComparisonDialog() {
+  if (!behaviorsData) {
+    behaviorsData = await fetchBehaviors();
+  }
+
+  const select = document.getElementById('comp-behavior-input');
+  select.innerHTML = behaviorsData.map(b =>
+    `<option value="${b.key}">${b.key} - ${b.description.substring(0, 50)}...</option>`
+  ).join('');
+
+  document.getElementById('comp-name-input').value = '';
+  document.getElementById('comp-prompt-a-input').value = '';
+  document.getElementById('comp-prompt-b-input').value = '';
+  document.getElementById('comp-tier-input').value = 'standard';
+
+  document.getElementById('comparison-dialog').showModal();
+}
+
+// Evaluation event listeners
+document.getElementById('new-evaluation-btn')?.addEventListener('click', openEvaluationDialog);
+document.getElementById('new-comparison-btn')?.addEventListener('click', openComparisonDialog);
+
+document.getElementById('cancel-eval-btn')?.addEventListener('click', () => {
+  document.getElementById('evaluation-dialog').close('cancel');
+});
+
+document.getElementById('cancel-comp-btn')?.addEventListener('click', () => {
+  document.getElementById('comparison-dialog').close('cancel');
+});
+
+document.getElementById('evaluation-dialog')?.addEventListener('close', async () => {
+  if (document.getElementById('evaluation-dialog').returnValue === 'cancel') return;
+
+  const name = document.getElementById('eval-name-input').value.trim();
+  const behaviorKey = document.getElementById('eval-behavior-input').value;
+  const systemPrompt = document.getElementById('eval-prompt-input').value.trim();
+  const tier = document.getElementById('eval-tier-input').value;
+
+  if (!name) return;
+
+  const promptConfig = systemPrompt ? { systemPrompt } : {};
+  await createEvaluation(name, behaviorKey, promptConfig, { tier });
+  await loadEvaluations();
+});
+
+document.getElementById('comparison-dialog')?.addEventListener('close', async () => {
+  if (document.getElementById('comparison-dialog').returnValue === 'cancel') return;
+
+  const name = document.getElementById('comp-name-input').value.trim();
+  const behaviorKey = document.getElementById('comp-behavior-input').value;
+  const promptA = document.getElementById('comp-prompt-a-input').value.trim();
+  const promptB = document.getElementById('comp-prompt-b-input').value.trim();
+  const tier = document.getElementById('comp-tier-input').value;
+
+  if (!name || !promptA || !promptB) return;
+
+  const comparison = await createComparison(name, promptA, promptB, behaviorKey, { tier });
+  await runComparison(comparison.id);
+  await loadEvaluations();
+});
+
+document.querySelectorAll('.eval-tab').forEach(tab => {
+  tab.addEventListener('click', () => switchEvalView(tab.dataset.evalView));
+});
+
+document.getElementById('back-to-list-btn')?.addEventListener('click', () => {
+  document.getElementById('evaluation-detail').style.display = 'none';
+  document.getElementById('evaluations-list').style.display = currentEvalView === 'list' ? 'block' : 'none';
+  document.getElementById('comparisons-list').style.display = currentEvalView === 'comparisons' ? 'block' : 'none';
 });
 
 // Initialize when DOM is ready

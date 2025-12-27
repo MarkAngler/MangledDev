@@ -9,6 +9,8 @@ const { PtyManager } = require('./pty-manager.js');
 const { loadTasks, saveTasks } = require('./task-store.js');
 const { loadWorkflows, saveWorkflows } = require('./workflow-store.js');
 const { scanExtensions } = require('./extension-scanner.js');
+const evaluationStore = require('./evaluation-store.js');
+const { runEvaluation, getEvaluationStatus, getTierConfig } = require('./evaluation-runner.js');
 
 // Large files scanner configuration
 const IGNORE_DIRS = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__pycache__', '.venv', '.cache', 'vendor'];
@@ -471,6 +473,235 @@ function startServer(port) {
       } catch (err) {
         console.error('Large files scan error:', err);
         res.status(500).json({ error: 'Scan failed' });
+      }
+    });
+
+    // Behaviors API
+    app.get('/api/behaviors', (req, res) => {
+      res.json(evaluationStore.getBehaviors());
+    });
+
+    app.post('/api/behaviors', (req, res) => {
+      const { key, description } = req.body;
+      if (!key || !description) {
+        return res.status(400).json({ error: 'key and description are required' });
+      }
+      try {
+        const behavior = evaluationStore.addBehavior(key, description);
+        res.status(201).json(behavior);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // Evaluations API
+    app.get('/api/evaluations', (req, res) => {
+      res.json(evaluationStore.getEvaluations());
+    });
+
+    app.get('/api/evaluations/:id', (req, res) => {
+      const evaluation = evaluationStore.getEvaluation(req.params.id);
+      if (!evaluation) {
+        return res.status(404).json({ error: 'Evaluation not found' });
+      }
+      res.json(evaluation);
+    });
+
+    app.post('/api/evaluations', (req, res) => {
+      const { name, behaviorKey, promptConfig, config } = req.body;
+      if (!name || !behaviorKey) {
+        return res.status(400).json({ error: 'name and behaviorKey are required' });
+      }
+
+      // Validate behavior exists
+      const behaviors = evaluationStore.getBehaviors();
+      if (!behaviors.some(b => b.key === behaviorKey)) {
+        return res.status(400).json({ error: `Invalid behaviorKey: ${behaviorKey}` });
+      }
+
+      const tierConfig = getTierConfig(config?.tier || 'standard');
+      const evaluation = {
+        id: uuidv4(),
+        name,
+        behaviorKey,
+        promptConfig: promptConfig || {},
+        config: {
+          tier: config?.tier || 'standard',
+          numScenarios: config?.numScenarios || tierConfig.numScenarios,
+          numJudges: config?.numJudges || tierConfig.numJudges,
+          maxTurns: config?.maxTurns || tierConfig.maxTurns,
+          diversity: config?.diversity || 0.5
+        },
+        status: 'pending',
+        stages: {
+          understanding: { status: 'pending' },
+          ideation: { status: 'pending' },
+          rollout: { status: 'pending' },
+          judgment: { status: 'pending' }
+        },
+        results: null,
+        createdAt: new Date().toISOString()
+      };
+
+      evaluationStore.createEvaluation(evaluation);
+      res.status(201).json(evaluation);
+    });
+
+    app.delete('/api/evaluations/:id', (req, res) => {
+      const success = evaluationStore.deleteEvaluation(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: 'Evaluation not found' });
+      }
+      res.status(204).end();
+    });
+
+    app.post('/api/evaluations/:id/run', async (req, res) => {
+      const evaluation = evaluationStore.getEvaluation(req.params.id);
+      if (!evaluation) {
+        return res.status(404).json({ error: 'Evaluation not found' });
+      }
+      if (evaluation.status === 'running') {
+        return res.status(400).json({ error: 'Evaluation is already running' });
+      }
+
+      // Start evaluation asynchronously
+      res.json({ message: 'Evaluation started', id: evaluation.id });
+
+      // Run in background (don't await)
+      runEvaluation(req.params.id).catch(err => {
+        console.error(`Evaluation ${req.params.id} failed:`, err);
+      });
+    });
+
+    app.get('/api/evaluations/:id/status', (req, res) => {
+      const status = getEvaluationStatus(req.params.id);
+      if (!status) {
+        return res.status(404).json({ error: 'Evaluation not found' });
+      }
+      res.json(status);
+    });
+
+    // Comparisons API
+    app.get('/api/comparisons', (req, res) => {
+      res.json(evaluationStore.getComparisons());
+    });
+
+    app.get('/api/comparisons/:id', (req, res) => {
+      const comparison = evaluationStore.getComparison(req.params.id);
+      if (!comparison) {
+        return res.status(404).json({ error: 'Comparison not found' });
+      }
+      res.json(comparison);
+    });
+
+    app.post('/api/comparisons', async (req, res) => {
+      const { name, promptA, promptB, behaviorKey, config } = req.body;
+      if (!name || !promptA || !promptB || !behaviorKey) {
+        return res.status(400).json({ error: 'name, promptA, promptB, and behaviorKey are required' });
+      }
+
+      // Create two evaluations for A/B comparison
+      const tierConfig = getTierConfig(config?.tier || 'standard');
+      const baseConfig = {
+        tier: config?.tier || 'standard',
+        numScenarios: config?.numScenarios || tierConfig.numScenarios,
+        numJudges: config?.numJudges || tierConfig.numJudges,
+        maxTurns: config?.maxTurns || tierConfig.maxTurns,
+        diversity: config?.diversity || 0.5
+      };
+
+      const evalA = {
+        id: uuidv4(),
+        name: `${name} - Variant A`,
+        behaviorKey,
+        promptConfig: { systemPrompt: promptA, name: 'A' },
+        config: baseConfig,
+        status: 'pending',
+        stages: {
+          understanding: { status: 'pending' },
+          ideation: { status: 'pending' },
+          rollout: { status: 'pending' },
+          judgment: { status: 'pending' }
+        },
+        createdAt: new Date().toISOString()
+      };
+
+      const evalB = {
+        id: uuidv4(),
+        name: `${name} - Variant B`,
+        behaviorKey,
+        promptConfig: { systemPrompt: promptB, name: 'B' },
+        config: baseConfig,
+        status: 'pending',
+        stages: {
+          understanding: { status: 'pending' },
+          ideation: { status: 'pending' },
+          rollout: { status: 'pending' },
+          judgment: { status: 'pending' }
+        },
+        createdAt: new Date().toISOString()
+      };
+
+      evaluationStore.createEvaluation(evalA);
+      evaluationStore.createEvaluation(evalB);
+
+      const comparison = {
+        id: uuidv4(),
+        name,
+        evaluationA: evalA.id,
+        evaluationB: evalB.id,
+        behaviorKey,
+        status: 'pending',
+        results: null,
+        createdAt: new Date().toISOString()
+      };
+
+      evaluationStore.createComparison(comparison);
+      res.status(201).json(comparison);
+    });
+
+    app.post('/api/comparisons/:id/run', async (req, res) => {
+      const comparison = evaluationStore.getComparison(req.params.id);
+      if (!comparison) {
+        return res.status(404).json({ error: 'Comparison not found' });
+      }
+      if (comparison.status === 'running') {
+        return res.status(400).json({ error: 'Comparison is already running' });
+      }
+
+      evaluationStore.updateComparison(req.params.id, { status: 'running' });
+      res.json({ message: 'Comparison started', id: comparison.id });
+
+      // Run both evaluations (could be parallelized, but sequential for simplicity)
+      try {
+        await runEvaluation(comparison.evaluationA);
+        await runEvaluation(comparison.evaluationB);
+
+        // Compare results
+        const evalA = evaluationStore.getEvaluation(comparison.evaluationA);
+        const evalB = evaluationStore.getEvaluation(comparison.evaluationB);
+
+        const scoreA = evalA?.results?.overallScore || 0;
+        const scoreB = evalB?.results?.overallScore || 0;
+
+        const results = {
+          winner: scoreA > scoreB ? 'A' : scoreB > scoreA ? 'B' : 'tie',
+          scoreA,
+          scoreB,
+          difference: Math.abs(scoreA - scoreB)
+        };
+
+        evaluationStore.updateComparison(req.params.id, {
+          status: 'completed',
+          completedAt: new Date().toISOString(),
+          results
+        });
+      } catch (err) {
+        console.error(`Comparison ${req.params.id} failed:`, err);
+        evaluationStore.updateComparison(req.params.id, {
+          status: 'error',
+          error: err.message
+        });
       }
     });
 
