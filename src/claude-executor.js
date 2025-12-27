@@ -19,7 +19,7 @@ async function executePrompt(prompt, options = {}) {
   } = options;
 
   return new Promise((resolve, reject) => {
-    const args = ['-p'];
+    const args = ['-p', '--max-turns', '1'];
 
     if (jsonOutput) {
       args.push('--output-format', 'json');

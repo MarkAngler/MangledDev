@@ -61,7 +61,7 @@ async function runUnderstanding(evaluationId) {
   });
 
   try {
-    const result = await executeJsonPrompt(prompt, { timeout: 120000 });
+    const result = await executeJsonPrompt(prompt, { timeout: 180000 });
 
     console.log(`[evaluation] Stage: Understanding - completed`);
     updateStage(evaluationId, 'understanding', {
@@ -355,7 +355,7 @@ async function judgeSingleTranscript(transcriptData, behavior, understanding) {
     transcript: transcriptText
   });
 
-  return executeJsonPrompt(prompt, { timeout: 120000 });
+  return executeJsonPrompt(prompt, { timeout: 180000 });
 }
 
 /**
