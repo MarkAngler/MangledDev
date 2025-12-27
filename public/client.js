@@ -1085,10 +1085,20 @@ function startEvaluationPolling() {
   if (evaluationPollingInterval) return;
   evaluationPollingInterval = setInterval(async () => {
     if (currentView === 'evaluations') {
-      const hasRunning = evaluationsData?.some(e => e.status === 'running') ||
-                         comparisonsData?.some(c => c.status === 'running');
-      if (hasRunning) {
-        await loadEvaluations();
+      // Check if viewing detail view of a running evaluation
+      const detailView = document.getElementById('evaluation-detail');
+      if (detailView && detailView.style.display !== 'none' && currentDetailEvalId) {
+        const currentEval = evaluationsData?.find(e => e.id === currentDetailEvalId);
+        if (currentEval?.status === 'running') {
+          await showEvaluationDetail(currentDetailEvalId);
+        }
+      } else {
+        // List view polling
+        const hasRunning = evaluationsData?.some(e => e.status === 'running') ||
+                           comparisonsData?.some(c => c.status === 'running');
+        if (hasRunning) {
+          await loadEvaluations();
+        }
       }
     }
   }, 3000);
@@ -1161,6 +1171,15 @@ function renderEvaluationsList() {
       }
     });
   });
+
+  // Add click handler on evaluation names to show detail view
+  list.querySelectorAll('.evaluation-name').forEach(name => {
+    name.addEventListener('click', (e) => {
+      const item = e.target.closest('.evaluation-item');
+      const id = item.dataset.id;
+      showEvaluationDetail(id);
+    });
+  });
 }
 
 function renderStageIndicator(name, stage) {
@@ -1199,6 +1218,322 @@ function renderEvaluationResults(results) {
         </div>
       ` : ''}
     </div>
+  `;
+}
+
+// ==================== Evaluation Detail View ====================
+
+let currentDetailEvalId = null;
+let currentDetailTab = 'understanding';
+
+async function showEvaluationDetail(id) {
+  currentDetailEvalId = id;
+
+  // Fetch full evaluation data
+  const res = await fetch(`/api/evaluations/${id}`);
+  if (!res.ok) {
+    console.error('Failed to fetch evaluation:', res.status);
+    return;
+  }
+  const evaluation = await res.json();
+
+  // Hide list views, show detail
+  document.getElementById('evaluations-list').style.display = 'none';
+  document.getElementById('comparisons-list').style.display = 'none';
+  document.getElementById('evaluation-detail').style.display = 'block';
+
+  // Render detail content
+  const content = document.getElementById('evaluation-detail-content');
+  const behavior = behaviorsData?.find(b => b.key === evaluation.behaviorKey);
+
+  content.innerHTML = `
+    ${renderDetailHeader(evaluation, behavior)}
+    <div class="detail-tabs">
+      <button class="detail-tab ${currentDetailTab === 'understanding' ? 'active' : ''}" data-tab="understanding">Understanding</button>
+      <button class="detail-tab ${currentDetailTab === 'ideation' ? 'active' : ''}" data-tab="ideation">Ideation</button>
+      <button class="detail-tab ${currentDetailTab === 'rollout' ? 'active' : ''}" data-tab="rollout">Rollout</button>
+      <button class="detail-tab ${currentDetailTab === 'judgment' ? 'active' : ''}" data-tab="judgment">Judgment</button>
+      <button class="detail-tab ${currentDetailTab === 'results' ? 'active' : ''}" data-tab="results">Results</button>
+    </div>
+    <div id="detail-tab-understanding" class="detail-tab-content ${currentDetailTab === 'understanding' ? 'active' : ''}">
+      ${renderUnderstandingTab(evaluation.stages?.understanding)}
+    </div>
+    <div id="detail-tab-ideation" class="detail-tab-content ${currentDetailTab === 'ideation' ? 'active' : ''}">
+      ${renderIdeationTab(evaluation.stages?.ideation)}
+    </div>
+    <div id="detail-tab-rollout" class="detail-tab-content ${currentDetailTab === 'rollout' ? 'active' : ''}">
+      ${renderRolloutTab(evaluation.stages?.rollout)}
+    </div>
+    <div id="detail-tab-judgment" class="detail-tab-content ${currentDetailTab === 'judgment' ? 'active' : ''}">
+      ${renderJudgmentTab(evaluation.stages?.judgment)}
+    </div>
+    <div id="detail-tab-results" class="detail-tab-content ${currentDetailTab === 'results' ? 'active' : ''}">
+      ${renderResultsTab(evaluation.results, evaluation.stages?.judgment)}
+    </div>
+  `;
+
+  // Add tab click handlers
+  content.querySelectorAll('.detail-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      switchDetailTab(tab.dataset.tab);
+    });
+  });
+
+  // Add transcript expand/collapse handlers
+  content.querySelectorAll('.transcript-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const item = header.closest('.transcript-item');
+      item.classList.toggle('expanded');
+    });
+  });
+}
+
+function switchDetailTab(tabName) {
+  currentDetailTab = tabName;
+  document.querySelectorAll('.detail-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.tab === tabName);
+  });
+  document.querySelectorAll('.detail-tab-content').forEach(content => {
+    content.classList.toggle('active', content.id === `detail-tab-${tabName}`);
+  });
+}
+
+function renderDetailHeader(evaluation, behavior) {
+  const score = evaluation.results?.overallScore;
+  const dist = evaluation.results?.scoreDistribution;
+
+  return `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <div>
+          <div class="detail-title">${escapeHtml(evaluation.name)}</div>
+          <div class="detail-behavior">${behavior?.description || evaluation.behaviorKey}</div>
+        </div>
+        ${score !== null && score !== undefined ? `
+          <div class="detail-score-large">
+            <div class="detail-score-value">${(score * 100).toFixed(0)}%</div>
+            <div class="detail-score-label">Overall Score</div>
+          </div>
+        ` : ''}
+      </div>
+      <div class="detail-meta">
+        <span class="evaluation-status status-${evaluation.status}">${evaluation.status}</span>
+        <span>Tier: ${evaluation.config?.tier || 'standard'}</span>
+        <span>Scenarios: ${evaluation.config?.numScenarios || 20}</span>
+        ${evaluation.createdAt ? `<span>Created: ${new Date(evaluation.createdAt).toLocaleDateString()}</span>` : ''}
+      </div>
+      ${dist ? `
+        <div class="score-distribution-bar">
+          <div class="score-distribution-range" style="left: ${dist.min * 100}%; width: ${(dist.max - dist.min) * 100}%"></div>
+          <div class="score-distribution-mean" style="left: ${dist.mean * 100}%"></div>
+        </div>
+        <div class="score-distribution-labels">
+          <span>0%</span>
+          <span>Min: ${(dist.min * 100).toFixed(0)}%</span>
+          <span>Mean: ${(dist.mean * 100).toFixed(0)}%</span>
+          <span>Max: ${(dist.max * 100).toFixed(0)}%</span>
+          <span>100%</span>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderUnderstandingTab(understanding) {
+  if (!understanding?.result) {
+    return '<div class="detail-empty">Understanding stage not yet completed.</div>';
+  }
+
+  const result = understanding.result;
+
+  const renderList = (items) => {
+    if (!items || !items.length) return '<p style="color: #666; font-style: italic;">None defined</p>';
+    return `<ul class="understanding-list">${items.map(item => `<li>${escapeHtml(typeof item === 'string' ? item : JSON.stringify(item))}</li>`).join('')}</ul>`;
+  };
+
+  return `
+    ${result.coreDefinition ? `
+      <div class="understanding-section">
+        <h4>Core Definition</h4>
+        <p style="color: #ccc; font-size: 13px; line-height: 1.6;">${escapeHtml(result.coreDefinition)}</p>
+      </div>
+    ` : ''}
+    <div class="understanding-section">
+      <h4>Observable Markers</h4>
+      ${renderList(result.observableMarkers)}
+    </div>
+    <div class="understanding-section">
+      <h4>Anti-Patterns</h4>
+      ${renderList(result.antiPatterns)}
+    </div>
+    <div class="understanding-section">
+      <h4>Success Criteria</h4>
+      ${renderList(result.successCriteria)}
+    </div>
+    <div class="understanding-section">
+      <h4>Failure Criteria</h4>
+      ${renderList(result.failureCriteria)}
+    </div>
+    ${result.boundaryConditions ? `
+      <div class="understanding-section">
+        <h4>Boundary Conditions</h4>
+        ${renderList(result.boundaryConditions)}
+      </div>
+    ` : ''}
+  `;
+}
+
+function renderIdeationTab(ideation) {
+  if (!ideation?.scenarios || ideation.scenarios.length === 0) {
+    return '<div class="detail-empty">Ideation stage not yet completed.</div>';
+  }
+
+  return `
+    <div class="scenario-grid">
+      ${ideation.scenarios.map((scenario, idx) => `
+        <div class="scenario-card">
+          <div class="scenario-card-header">
+            <span class="scenario-id">#${idx + 1} ${scenario.id || ''}</span>
+            <div class="scenario-badges">
+              ${scenario.domain ? `<span class="scenario-badge badge-domain">${escapeHtml(scenario.domain)}</span>` : ''}
+              ${scenario.difficulty ? `<span class="scenario-badge badge-difficulty">${escapeHtml(scenario.difficulty)}</span>` : ''}
+            </div>
+          </div>
+          <div class="scenario-prompt">${escapeHtml(scenario.prompt || scenario.description || JSON.stringify(scenario))}</div>
+          ${scenario.context ? `<div class="scenario-context">${escapeHtml(scenario.context)}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderRolloutTab(rollout) {
+  if (!rollout?.transcripts || rollout.transcripts.length === 0) {
+    return '<div class="detail-empty">Rollout stage not yet completed.</div>';
+  }
+
+  return `
+    <div class="transcript-list">
+      ${rollout.transcripts.map((t, idx) => `
+        <div class="transcript-item">
+          <div class="transcript-header">
+            <div class="transcript-scenario-info">
+              <span class="transcript-scenario-id">#${idx + 1} ${t.scenarioId || ''}</span>
+              <span class="transcript-turn-count">${t.turnCount || t.transcript?.length || 0} turns</span>
+              ${t.completed === false ? '<span style="color: #f44336; font-size: 11px;">incomplete</span>' : ''}
+            </div>
+            <span class="transcript-chevron">&#9660;</span>
+          </div>
+          <div class="transcript-content">
+            <div class="transcript-messages">
+              ${(t.transcript || []).map(msg => `
+                <div class="transcript-bubble ${msg.role}">
+                  <div class="transcript-bubble-role">${msg.role}</div>
+                  ${escapeHtml(msg.content || '')}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderJudgmentTab(judgment) {
+  if (!judgment?.judgments || judgment.judgments.length === 0) {
+    return '<div class="detail-empty">Judgment stage not yet completed.</div>';
+  }
+
+  return `
+    <div class="judgment-grid">
+      ${judgment.judgments.map((j, idx) => {
+        const scorePercent = (j.score * 100).toFixed(0);
+        const scoreClass = j.score >= 0.7 ? 'high' : j.score >= 0.4 ? 'medium' : 'low';
+
+        return `
+          <div class="judgment-card">
+            <div class="judgment-card-header">
+              <span class="judgment-scenario-id">#${idx + 1} ${j.scenarioId || ''}</span>
+              <div>
+                <span class="judgment-score ${scoreClass}">${scorePercent}%</span>
+                ${j.confidence ? `<span class="judgment-confidence">(${(j.confidence * 100).toFixed(0)}% confident)</span>` : ''}
+              </div>
+            </div>
+            ${j.summary ? `<div class="judgment-summary">${escapeHtml(j.summary)}</div>` : ''}
+            ${j.positiveEvidence?.length ? `
+              <div class="evidence-section">
+                <h5 class="positive">Positive Evidence</h5>
+                <ul class="evidence-list positive">
+                  ${j.positiveEvidence.map(e => `<li>${escapeHtml(typeof e === 'string' ? e : e.explanation || JSON.stringify(e))}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+            ${j.negativeEvidence?.length ? `
+              <div class="evidence-section">
+                <h5 class="negative">Negative Evidence</h5>
+                <ul class="evidence-list negative">
+                  ${j.negativeEvidence.map(e => `<li>${escapeHtml(typeof e === 'string' ? e : e.explanation || JSON.stringify(e))}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderResultsTab(results, judgment) {
+  if (!results) {
+    return '<div class="detail-empty">Results not yet available.</div>';
+  }
+
+  const dist = results.scoreDistribution;
+  const validJudgments = judgment?.judgments?.filter(j => j.score !== null && j.score !== undefined) || [];
+
+  return `
+    <div class="results-summary">
+      <div class="results-stat">
+        <div class="results-stat-value">${results.overallScore !== null ? (results.overallScore * 100).toFixed(0) + '%' : 'N/A'}</div>
+        <div class="results-stat-label">Overall Score</div>
+      </div>
+      ${dist ? `
+        <div class="results-stat">
+          <div class="results-stat-value">${(dist.min * 100).toFixed(0)}% - ${(dist.max * 100).toFixed(0)}%</div>
+          <div class="results-stat-label">Score Range</div>
+        </div>
+        <div class="results-stat">
+          <div class="results-stat-value">${(dist.std * 100).toFixed(1)}%</div>
+          <div class="results-stat-label">Std Deviation</div>
+        </div>
+      ` : ''}
+      <div class="results-stat">
+        <div class="results-stat-value">${validJudgments.length}</div>
+        <div class="results-stat-label">Scenarios Judged</div>
+      </div>
+    </div>
+
+    ${results.keyQuotes?.length ? `
+      <div class="results-section">
+        <h4>Key Evidence</h4>
+        ${results.keyQuotes.map(q => `
+          <div class="key-quote-item">
+            <div class="key-quote-text">"${escapeHtml(q.quote || q.explanation || JSON.stringify(q))}"</div>
+            ${q.scenarioId ? `<div class="key-quote-source">Scenario: ${q.scenarioId}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${results.failurePatterns?.length ? `
+      <div class="results-section">
+        <h4>Failure Patterns</h4>
+        ${results.failurePatterns.map(f => `
+          <div class="failure-pattern-item">${escapeHtml(typeof f === 'string' ? f : f.summary || JSON.stringify(f))}</div>
+        `).join('')}
+      </div>
+    ` : ''}
   `;
 }
 
