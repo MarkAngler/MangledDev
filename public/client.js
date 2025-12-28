@@ -1347,7 +1347,10 @@ function renderUnderstandingTab(understanding) {
   const result = understanding.result;
 
   const renderList = (items) => {
-    if (!items || !items.length) return '<p style="color: #666; font-style: italic;">None defined</p>';
+    if (!items || (Array.isArray(items) && !items.length)) return '<p style="color: #666; font-style: italic;">None defined</p>';
+    if (!Array.isArray(items)) {
+      return `<p style="color: #ccc; font-size: 13px; line-height: 1.6;">${escapeHtml(String(items))}</p>`;
+    }
     return `<ul class="understanding-list">${items.map(item => `<li>${escapeHtml(typeof item === 'string' ? item : JSON.stringify(item))}</li>`).join('')}</ul>`;
   };
 
