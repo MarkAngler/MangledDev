@@ -1,6 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
-const pty = require('node-pty');
-const { executeJsonPrompt, stripAnsi } = require('./claude-executor.js');
+const { executeJsonPrompt, executeConversationTurn } = require('./claude-executor.js');
 const {
   UNDERSTANDING_PROMPT,
   IDEATION_PROMPT,
@@ -125,130 +124,70 @@ async function runIdeation(evaluationId, understanding) {
 }
 
 /**
- * Run a single scenario rollout using PTY
+ * Run a single scenario rollout using non-interactive CLI with session persistence
  */
 async function runSingleRollout(scenario, promptConfig, maxTurns, understanding) {
-  return new Promise((resolve, reject) => {
-    const transcript = [];
-    let outputBuffer = '';
-    let turnCount = 0;
-    let isWaitingForResponse = false;
-    let responseTimer = null;
-    const RESPONSE_TIMEOUT = 60000; // 60s per turn
+  const transcript = [];
+  const sessionId = uuidv4();
+  let turnCount = 0;
+  const TURN_TIMEOUT = 120000; // 2 minutes per turn
 
-    // Spawn PTY with target agent
-    const args = [];
-    if (promptConfig.systemPrompt) {
-      args.push('--system-prompt', promptConfig.systemPrompt);
-    }
-
-    const term = pty.spawn('claude', args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 40,
-      cwd: process.cwd(),
-      env: { ...process.env, COLORTERM: 'truecolor' }
+  try {
+    // Turn 1: Initial prompt
+    transcript.push({
+      role: 'user',
+      content: scenario.prompt,
+      timestamp: new Date().toISOString()
     });
 
-    const cleanup = () => {
-      if (responseTimer) clearTimeout(responseTimer);
-      try {
-        term.kill();
-      } catch (e) {
-        // Already killed
-      }
-    };
-
-    // Detect when response is complete (heuristic: no output for 2 seconds)
-    let lastOutputTime = Date.now();
-    let outputCheckInterval = null;
-
-    const checkForResponseEnd = () => {
-      if (isWaitingForResponse && Date.now() - lastOutputTime > 2000) {
-        // Response seems complete
-        clearInterval(outputCheckInterval);
-        isWaitingForResponse = false;
-
-        const response = stripAnsi(outputBuffer).trim();
-        outputBuffer = '';
-
-        if (response) {
-          transcript.push({
-            role: 'assistant',
-            content: response,
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        turnCount++;
-
-        // Check if we should continue
-        if (turnCount >= maxTurns) {
-          cleanup();
-          resolve({ transcript, completed: true, turnCount });
-          return;
-        }
-
-        // Ask evaluator if we should continue
-        decideNextAction(transcript, scenario, understanding).then(action => {
-          if (action.action === 'complete' || !action.message) {
-            cleanup();
-            resolve({ transcript, completed: true, turnCount });
-          } else {
-            // Send follow-up message
-            transcript.push({
-              role: 'user',
-              content: action.message,
-              timestamp: new Date().toISOString()
-            });
-            sendMessage(action.message);
-          }
-        }).catch(err => {
-          cleanup();
-          resolve({ transcript, completed: false, error: err.message, turnCount });
-        });
-      }
-    };
-
-    const sendMessage = (message) => {
-      outputBuffer = '';
-      isWaitingForResponse = true;
-      lastOutputTime = Date.now();
-      outputCheckInterval = setInterval(checkForResponseEnd, 500);
-
-      responseTimer = setTimeout(() => {
-        clearInterval(outputCheckInterval);
-        cleanup();
-        resolve({ transcript, completed: false, error: 'Response timeout', turnCount });
-      }, RESPONSE_TIMEOUT);
-
-      term.write(message + '\r');
-    };
-
-    term.onData((data) => {
-      outputBuffer += data;
-      lastOutputTime = Date.now();
+    const firstResponse = await executeConversationTurn(scenario.prompt, {
+      sessionId,
+      systemPrompt: promptConfig.systemPrompt,
+      timeout: TURN_TIMEOUT,
+      isFirstTurn: true
     });
 
-    term.onExit(() => {
-      cleanup();
-      if (transcript.length === 0) {
-        reject(new Error('PTY exited before any output'));
-      } else {
-        resolve({ transcript, completed: true, turnCount });
-      }
+    transcript.push({
+      role: 'assistant',
+      content: firstResponse.text,
+      timestamp: new Date().toISOString()
     });
+    turnCount = 1;
 
-    // Start with initial prompt
-    setTimeout(() => {
+    // Subsequent turns: decide if we should continue
+    while (turnCount < maxTurns) {
+      const action = await decideNextAction(transcript, scenario, understanding);
+
+      if (action.action === 'complete' || !action.message) {
+        break;
+      }
+
+      // Send follow-up message
       transcript.push({
         role: 'user',
-        content: scenario.prompt,
+        content: action.message,
         timestamp: new Date().toISOString()
       });
-      sendMessage(scenario.prompt);
-    }, 1000); // Wait for PTY to initialize
-  });
+
+      const response = await executeConversationTurn(action.message, {
+        sessionId,
+        systemPrompt: promptConfig.systemPrompt,
+        timeout: TURN_TIMEOUT,
+        isFirstTurn: false
+      });
+
+      transcript.push({
+        role: 'assistant',
+        content: response.text,
+        timestamp: new Date().toISOString()
+      });
+      turnCount++;
+    }
+
+    return { transcript, completed: true, turnCount };
+  } catch (err) {
+    return { transcript, completed: false, error: err.message, turnCount };
+  }
 }
 
 /**

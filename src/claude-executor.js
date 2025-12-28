@@ -175,9 +175,123 @@ function cleanPtyOutput(output) {
   return cleaned;
 }
 
+/**
+ * Execute a single turn in a conversation, with optional session persistence
+ * @param {string} prompt - The prompt to send
+ * @param {object} options - Execution options
+ * @param {string} options.sessionId - Session ID for conversation persistence (used with --resume for subsequent turns)
+ * @param {string} options.systemPrompt - Optional system prompt
+ * @param {number} options.timeout - Timeout in ms (default: 120000)
+ * @param {boolean} options.isFirstTurn - Whether this is the first turn (uses --session-id, not --resume)
+ * @returns {Promise<{text: string, json?: object, sessionId: string}>}
+ */
+async function executeConversationTurn(prompt, options = {}) {
+  const {
+    sessionId,
+    systemPrompt,
+    timeout = 120000,
+    isFirstTurn = true
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    const args = ['-p', '--permission-mode', 'default', '--output-format', 'json'];
+
+    // For first turn, use --session-id to set the ID
+    // For subsequent turns, use --resume to continue the conversation
+    if (sessionId) {
+      if (isFirstTurn) {
+        args.push('--session-id', sessionId);
+      } else {
+        args.push('--resume', sessionId);
+      }
+    }
+
+    if (systemPrompt) {
+      args.push('--system-prompt', systemPrompt);
+    }
+
+    args.push(prompt);
+
+    const promptPreview = prompt.substring(0, 100).replace(/\n/g, ' ');
+    console.log(`[claude-executor] Conversation turn (session: ${sessionId || 'none'}, first: ${isFirstTurn}): "${promptPreview}..."`);
+    const startTime = Date.now();
+
+    const proc = spawn('claude', args, {
+      cwd: process.cwd(),
+      env: { ...process.env }
+    });
+
+    proc.stdin.end();
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.log(`[claude-executor] Conversation turn TIMEOUT after ${timeout}ms`);
+      proc.kill('SIGTERM');
+      reject(new Error(`Command timed out after ${timeout}ms`));
+    }, timeout);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[claude-executor] Conversation turn completed with exit code ${code} in ${elapsed}ms`);
+
+      if (code !== 0) {
+        console.log(`[claude-executor] Error: ${stderr.substring(0, 200)}`);
+        reject(new Error(`claude exited with code ${code}: ${stderr}`));
+        return;
+      }
+
+      const result = { text: stdout.trim(), sessionId };
+
+      try {
+        const json = JSON.parse(stdout);
+        result.json = json;
+
+        // Extract text from CLI wrapper format
+        if (json.type === 'result' && typeof json.result === 'string') {
+          result.text = json.result;
+        } else if (json.content) {
+          result.text = json.content;
+        } else if (json.result) {
+          result.text = typeof json.result === 'string' ? json.result : JSON.stringify(json.result);
+        }
+      } catch (e) {
+        // JSON parsing failed, keep text as-is
+      }
+
+      resolve(result);
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+      console.log(`[claude-executor] Spawn error: ${err.message}`);
+      reject(new Error(`Failed to spawn claude: ${err.message}`));
+    });
+  });
+}
+
 module.exports = {
   executePrompt,
   executeJsonPrompt,
+  executeConversationTurn,
   stripAnsi,
   cleanPtyOutput
 };
