@@ -19,7 +19,7 @@ async function executePrompt(prompt, options = {}) {
   } = options;
 
   return new Promise((resolve, reject) => {
-    const args = ['-p'];
+    const args = ['-p', '--permission-mode', 'default'];
 
     if (jsonOutput) {
       args.push('--output-format', 'json');
@@ -112,21 +112,38 @@ async function executePrompt(prompt, options = {}) {
 async function executeJsonPrompt(prompt, options = {}) {
   const result = await executePrompt(prompt, { ...options, jsonOutput: true });
 
+  // The Claude CLI with --output-format json returns a wrapper object:
+  // { type: "result", result: "actual response text", session_id: ..., usage: ... }
+  // The actual AI response is in the nested 'result' field as a string,
+  // which may contain JSON embedded in markdown code blocks.
+
+  let textToParse = result.text;
+
   if (result.json) {
-    return result.json;
+    // Check if this is a CLI wrapper with nested result
+    if (result.json.type === 'result' && typeof result.json.result === 'string') {
+      textToParse = result.json.result;
+    } else if (!result.json.type && !result.json.session_id) {
+      // This looks like direct JSON content (not a wrapper), return it
+      return result.json;
+    }
   }
 
-  // Try to extract JSON from text response
-  const jsonMatch = result.text.match(/```json\s*([\s\S]*?)\s*```/);
+  // Try to extract JSON from markdown code blocks in the response
+  const jsonMatch = textToParse.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonMatch) {
-    return JSON.parse(jsonMatch[1]);
+    try {
+      return JSON.parse(jsonMatch[1]);
+    } catch (e) {
+      // Fall through to try other parsing methods
+    }
   }
 
-  // Try parsing the entire response as JSON
+  // Try parsing the entire text as JSON
   try {
-    return JSON.parse(result.text);
+    return JSON.parse(textToParse);
   } catch (e) {
-    throw new Error(`Failed to parse JSON response: ${result.text.substring(0, 200)}`);
+    throw new Error(`Failed to parse JSON response: ${textToParse.substring(0, 200)}`);
   }
 }
 
