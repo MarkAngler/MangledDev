@@ -1142,8 +1142,8 @@ function renderEvaluationsList() {
         </div>
         ${e.results ? renderEvaluationResults(e.results) : ''}
         <div class="evaluation-actions">
-          <button class="run-eval-btn" ${e.status === 'running' || e.status === 'completed' ? 'disabled' : ''}>
-            ${e.status === 'running' ? 'Running...' : e.status === 'completed' ? 'Completed' : 'Run'}
+          <button class="run-eval-btn" ${e.status === 'running' ? 'disabled' : ''}>
+            ${e.status === 'running' ? 'Running...' : e.status === 'completed' ? 'Run Again' : 'Run'}
           </button>
           <button class="delete-eval-btn">Delete</button>
         </div>

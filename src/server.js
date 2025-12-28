@@ -564,6 +564,38 @@ function startServer(port) {
         return res.status(400).json({ error: 'Evaluation is already running' });
       }
 
+      // Archive previous run if exists (completed or error)
+      if (evaluation.status === 'completed' || evaluation.status === 'error') {
+        const previousRun = {
+          runNumber: (evaluation.runHistory?.length || 0) + 1,
+          status: evaluation.status,
+          startedAt: evaluation.startedAt,
+          completedAt: evaluation.completedAt,
+          results: evaluation.results,
+          stages: evaluation.stages,
+          error: evaluation.error
+        };
+
+        const runHistory = evaluation.runHistory || [];
+        runHistory.push(previousRun);
+
+        // Reset evaluation state for new run
+        evaluationStore.updateEvaluation(req.params.id, {
+          runHistory,
+          status: 'pending',
+          startedAt: null,
+          completedAt: null,
+          results: null,
+          error: null,
+          stages: {
+            understanding: { status: 'pending' },
+            ideation: { status: 'pending' },
+            rollout: { status: 'pending' },
+            judgment: { status: 'pending' }
+          }
+        });
+      }
+
       // Start evaluation asynchronously
       res.json({ message: 'Evaluation started', id: evaluation.id });
 
