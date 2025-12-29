@@ -16,6 +16,24 @@ let workflowPanelVisible = false;
 let expandedWorkflows = new Set();
 let editingWorkflowId = null;
 let dialogSteps = [];
+let evaluationsData = null;
+let comparisonsData = null;
+let behaviorsData = null;
+let currentEvalView = 'list';
+let evaluationPollingInterval = null;
+
+// Safe terminal fit that ensures integer dimensions
+function safeTerminalFit() {
+  if (!fitAddon || !terminal) return;
+  try {
+    const dims = fitAddon.proposeDimensions();
+    if (dims && dims.cols > 0 && dims.rows > 0) {
+      terminal.resize(Math.floor(dims.cols), Math.floor(dims.rows));
+    }
+  } catch (e) {
+    // Ignore errors when terminal not ready
+  }
+}
 
 async function fetchSessions() {
   const res = await fetch('/api/sessions');
@@ -646,11 +664,7 @@ function toggleWorkflowPanel() {
   }
 
   // Resize terminal when panel toggles
-  setTimeout(() => {
-    if (fitAddon) {
-      fitAddon.fit();
-    }
-  }, 50);
+  setTimeout(safeTerminalFit, 50);
 }
 
 async function refreshWorkflows() {
@@ -729,6 +743,7 @@ function switchView(view) {
   });
 
   document.getElementById('terminal-area').style.display = view === 'sessions' ? 'flex' : 'none';
+  document.getElementById('evaluations-area').style.display = view === 'evaluations' ? 'flex' : 'none';
   document.getElementById('extensions-area').style.display = view === 'extensions' ? 'flex' : 'none';
   document.getElementById('config-area').style.display = view === 'config' ? 'flex' : 'none';
   document.getElementById('large-files-area').style.display = view === 'large-files' ? 'flex' : 'none';
@@ -743,6 +758,13 @@ function switchView(view) {
 
   if (view === 'large-files' && !largeFilesData) {
     loadLargeFiles();
+  }
+
+  if (view === 'evaluations') {
+    loadEvaluations();
+    startEvaluationPolling();
+  } else {
+    stopEvaluationPolling();
   }
 }
 
@@ -776,7 +798,7 @@ function initTerminal() {
   fitAddon = new FitAddon.FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(container);
-  fitAddon.fit();
+  safeTerminalFit();
 
   terminal.onData((data) => {
     if (currentWs && currentWs.readyState === WebSocket.OPEN) {
@@ -831,7 +853,7 @@ function connectToSession(sessionId, sessionName) {
   currentWs = new WebSocket(wsUrl);
 
   currentWs.onopen = () => {
-    fitAddon.fit();
+    safeTerminalFit();
     currentWs.send(JSON.stringify({
       type: 'resize',
       cols: terminal.cols,
@@ -932,11 +954,7 @@ document.getElementById('task-dialog').addEventListener('close', async () => {
   refreshTasks();
 });
 
-window.addEventListener('resize', () => {
-  if (fitAddon) {
-    fitAddon.fit();
-  }
-});
+window.addEventListener('resize', safeTerminalFit);
 
 // View tab event listeners
 document.querySelectorAll('.view-tab').forEach(tab => {
@@ -990,6 +1008,701 @@ document.getElementById('workflow-dialog').addEventListener('close', async () =>
   editingWorkflowId = null;
   dialogSteps = [];
   refreshWorkflows();
+});
+
+// Evaluation API
+async function fetchBehaviors() {
+  const res = await fetch('/api/behaviors');
+  return res.json();
+}
+
+async function fetchEvaluations() {
+  const res = await fetch('/api/evaluations');
+  return res.json();
+}
+
+async function fetchComparisons() {
+  const res = await fetch('/api/comparisons');
+  return res.json();
+}
+
+async function createEvaluation(name, behaviorKey, promptConfig, config) {
+  const res = await fetch('/api/evaluations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, behaviorKey, promptConfig, config })
+  });
+  return res.json();
+}
+
+async function deleteEvaluation(id) {
+  await fetch(`/api/evaluations/${id}`, { method: 'DELETE' });
+}
+
+async function runEvaluation(id) {
+  const res = await fetch(`/api/evaluations/${id}/run`, { method: 'POST' });
+  return res.json();
+}
+
+async function getEvaluationStatus(id) {
+  const res = await fetch(`/api/evaluations/${id}/status`);
+  return res.json();
+}
+
+async function createComparison(name, promptA, promptB, behaviorKey, config) {
+  const res = await fetch('/api/comparisons', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, promptA, promptB, behaviorKey, config })
+  });
+  return res.json();
+}
+
+async function runComparison(id) {
+  const res = await fetch(`/api/comparisons/${id}/run`, { method: 'POST' });
+  return res.json();
+}
+
+async function deleteComparison(id) {
+  await fetch(`/api/comparisons/${id}`, { method: 'DELETE' });
+}
+
+async function loadEvaluations() {
+  try {
+    [evaluationsData, comparisonsData, behaviorsData] = await Promise.all([
+      fetchEvaluations(),
+      fetchComparisons(),
+      fetchBehaviors()
+    ]);
+    renderEvaluationsList();
+    renderComparisonsList();
+  } catch (err) {
+    console.error('Error loading evaluations:', err);
+  }
+}
+
+function startEvaluationPolling() {
+  if (evaluationPollingInterval) return;
+  evaluationPollingInterval = setInterval(async () => {
+    if (currentView === 'evaluations') {
+      // Check if viewing detail view of a running evaluation
+      const detailView = document.getElementById('evaluation-detail');
+      if (detailView && detailView.style.display !== 'none' && currentDetailEvalId) {
+        const currentEval = evaluationsData?.find(e => e.id === currentDetailEvalId);
+        if (currentEval?.status === 'running') {
+          await showEvaluationDetail(currentDetailEvalId);
+        }
+      } else {
+        // List view polling
+        const hasRunning = evaluationsData?.some(e => e.status === 'running') ||
+                           comparisonsData?.some(c => c.status === 'running');
+        if (hasRunning) {
+          await loadEvaluations();
+        }
+      }
+    }
+  }, 3000);
+}
+
+function stopEvaluationPolling() {
+  if (evaluationPollingInterval) {
+    clearInterval(evaluationPollingInterval);
+    evaluationPollingInterval = null;
+  }
+}
+
+function renderEvaluationsList() {
+  const list = document.getElementById('evaluations-list');
+  if (!list) return;
+
+  if (!evaluationsData || evaluationsData.length === 0) {
+    list.innerHTML = '<div style="color: #888; text-align: center; padding: 40px;">No evaluations yet. Create one to get started.</div>';
+    return;
+  }
+
+  list.innerHTML = evaluationsData.map(e => {
+    const stages = e.stages || {};
+    const behavior = behaviorsData?.find(b => b.key === e.behaviorKey);
+
+    return `
+      <div class="evaluation-item" data-id="${e.id}">
+        <div class="evaluation-item-header">
+          <span class="evaluation-name">${escapeHtml(e.name)}</span>
+          <div class="evaluation-meta">
+            <span class="evaluation-status status-${e.status}">${e.status}</span>
+          </div>
+        </div>
+        <div class="evaluation-behavior">Testing: ${behavior?.description || e.behaviorKey}</div>
+        <div class="evaluation-config">Tier: ${e.config?.tier || 'standard'} | Scenarios: ${e.config?.numScenarios || 20}</div>
+        <div class="evaluation-stages">
+          ${renderStageIndicator('Understanding', stages.understanding)}
+          ${renderStageIndicator('Ideation', stages.ideation)}
+          ${renderStageIndicator('Rollout', stages.rollout)}
+          ${renderStageIndicator('Judgment', stages.judgment)}
+        </div>
+        ${e.results ? renderEvaluationResults(e.results) : ''}
+        <div class="evaluation-actions">
+          <button class="run-eval-btn" ${e.status === 'running' ? 'disabled' : ''}>
+            ${e.status === 'running' ? 'Running...' : e.status === 'completed' ? 'Run Again' : 'Run'}
+          </button>
+          <button class="delete-eval-btn">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Add event listeners
+  list.querySelectorAll('.run-eval-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.evaluation-item');
+      const id = item.dataset.id;
+      await runEvaluation(id);
+      await loadEvaluations();
+    });
+  });
+
+  list.querySelectorAll('.delete-eval-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.evaluation-item');
+      const id = item.dataset.id;
+      if (confirm('Delete this evaluation?')) {
+        await deleteEvaluation(id);
+        await loadEvaluations();
+      }
+    });
+  });
+
+  // Add click handler on evaluation names to show detail view
+  list.querySelectorAll('.evaluation-name').forEach(name => {
+    name.addEventListener('click', (e) => {
+      const item = e.target.closest('.evaluation-item');
+      const id = item.dataset.id;
+      showEvaluationDetail(id);
+    });
+  });
+}
+
+function renderStageIndicator(name, stage) {
+  const status = stage?.status || 'pending';
+  let progress = 0;
+  if (status === 'completed') progress = 100;
+  else if (status === 'running' && stage.completed && stage.total) {
+    progress = Math.round((stage.completed / stage.total) * 100);
+  }
+
+  return `
+    <div class="stage-indicator">
+      <div class="stage-bar">
+        <div class="stage-bar-fill ${status}" style="width: ${progress}%"></div>
+      </div>
+      <span class="stage-label">${name}</span>
+    </div>
+  `;
+}
+
+function renderEvaluationResults(results) {
+  if (!results || results.overallScore === null) return '';
+
+  const score = (results.overallScore * 100).toFixed(0);
+  const dist = results.scoreDistribution;
+
+  return `
+    <div class="evaluation-results">
+      <div class="result-score">${score}%</div>
+      ${dist ? `<div class="result-distribution">Range: ${(dist.min * 100).toFixed(0)}% - ${(dist.max * 100).toFixed(0)}% | Std: ${(dist.std * 100).toFixed(1)}%</div>` : ''}
+      ${results.keyQuotes?.length ? `
+        <div class="result-quotes">
+          ${results.keyQuotes.slice(0, 2).map(q => `
+            <div class="result-quote">"${escapeHtml(q.quote || q.explanation || JSON.stringify(q))}"</div>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// ==================== Evaluation Detail View ====================
+
+let currentDetailEvalId = null;
+let currentDetailTab = 'understanding';
+
+async function showEvaluationDetail(id) {
+  currentDetailEvalId = id;
+
+  // Fetch full evaluation data
+  const res = await fetch(`/api/evaluations/${id}`);
+  if (!res.ok) {
+    console.error('Failed to fetch evaluation:', res.status);
+    return;
+  }
+  const evaluation = await res.json();
+
+  // Hide list views, show detail
+  document.getElementById('evaluations-list').style.display = 'none';
+  document.getElementById('comparisons-list').style.display = 'none';
+  document.getElementById('evaluation-detail').style.display = 'block';
+
+  // Render detail content
+  const content = document.getElementById('evaluation-detail-content');
+  const behavior = behaviorsData?.find(b => b.key === evaluation.behaviorKey);
+
+  content.innerHTML = `
+    ${renderDetailHeader(evaluation, behavior)}
+    <div class="detail-tabs">
+      <button class="detail-tab ${currentDetailTab === 'understanding' ? 'active' : ''}" data-tab="understanding">Understanding</button>
+      <button class="detail-tab ${currentDetailTab === 'ideation' ? 'active' : ''}" data-tab="ideation">Ideation</button>
+      <button class="detail-tab ${currentDetailTab === 'rollout' ? 'active' : ''}" data-tab="rollout">Rollout</button>
+      <button class="detail-tab ${currentDetailTab === 'judgment' ? 'active' : ''}" data-tab="judgment">Judgment</button>
+      <button class="detail-tab ${currentDetailTab === 'results' ? 'active' : ''}" data-tab="results">Results</button>
+    </div>
+    <div id="detail-tab-understanding" class="detail-tab-content ${currentDetailTab === 'understanding' ? 'active' : ''}">
+      ${renderUnderstandingTab(evaluation.stages?.understanding)}
+    </div>
+    <div id="detail-tab-ideation" class="detail-tab-content ${currentDetailTab === 'ideation' ? 'active' : ''}">
+      ${renderIdeationTab(evaluation.stages?.ideation)}
+    </div>
+    <div id="detail-tab-rollout" class="detail-tab-content ${currentDetailTab === 'rollout' ? 'active' : ''}">
+      ${renderRolloutTab(evaluation.stages?.rollout)}
+    </div>
+    <div id="detail-tab-judgment" class="detail-tab-content ${currentDetailTab === 'judgment' ? 'active' : ''}">
+      ${renderJudgmentTab(evaluation.stages?.judgment)}
+    </div>
+    <div id="detail-tab-results" class="detail-tab-content ${currentDetailTab === 'results' ? 'active' : ''}">
+      ${renderResultsTab(evaluation.results, evaluation.stages?.judgment)}
+    </div>
+  `;
+
+  // Add tab click handlers
+  content.querySelectorAll('.detail-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      switchDetailTab(tab.dataset.tab);
+    });
+  });
+
+  // Add transcript expand/collapse handlers
+  content.querySelectorAll('.transcript-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const item = header.closest('.transcript-item');
+      item.classList.toggle('expanded');
+    });
+  });
+}
+
+function switchDetailTab(tabName) {
+  currentDetailTab = tabName;
+  document.querySelectorAll('.detail-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.tab === tabName);
+  });
+  document.querySelectorAll('.detail-tab-content').forEach(content => {
+    content.classList.toggle('active', content.id === `detail-tab-${tabName}`);
+  });
+}
+
+function renderDetailHeader(evaluation, behavior) {
+  const score = evaluation.results?.overallScore;
+  const dist = evaluation.results?.scoreDistribution;
+
+  return `
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <div>
+          <div class="detail-title">${escapeHtml(evaluation.name)}</div>
+          <div class="detail-behavior">${behavior?.description || evaluation.behaviorKey}</div>
+        </div>
+        ${score !== null && score !== undefined ? `
+          <div class="detail-score-large">
+            <div class="detail-score-value">${(score * 100).toFixed(0)}%</div>
+            <div class="detail-score-label">Overall Score</div>
+          </div>
+        ` : ''}
+      </div>
+      <div class="detail-meta">
+        <span class="evaluation-status status-${evaluation.status}">${evaluation.status}</span>
+        <span>Tier: ${evaluation.config?.tier || 'standard'}</span>
+        <span>Scenarios: ${evaluation.config?.numScenarios || 20}</span>
+        ${evaluation.createdAt ? `<span>Created: ${new Date(evaluation.createdAt).toLocaleDateString()}</span>` : ''}
+      </div>
+      ${dist ? `
+        <div class="score-distribution-bar">
+          <div class="score-distribution-range" style="left: ${dist.min * 100}%; width: ${(dist.max - dist.min) * 100}%"></div>
+          <div class="score-distribution-mean" style="left: ${dist.mean * 100}%"></div>
+        </div>
+        <div class="score-distribution-labels">
+          <span>0%</span>
+          <span>Min: ${(dist.min * 100).toFixed(0)}%</span>
+          <span>Mean: ${(dist.mean * 100).toFixed(0)}%</span>
+          <span>Max: ${(dist.max * 100).toFixed(0)}%</span>
+          <span>100%</span>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderUnderstandingTab(understanding) {
+  if (!understanding?.result) {
+    return '<div class="detail-empty">Understanding stage not yet completed.</div>';
+  }
+
+  const result = understanding.result;
+
+  const renderList = (items) => {
+    if (!items || (Array.isArray(items) && !items.length)) return '<p style="color: #666; font-style: italic;">None defined</p>';
+    if (!Array.isArray(items)) {
+      return `<p style="color: #ccc; font-size: 13px; line-height: 1.6;">${escapeHtml(String(items))}</p>`;
+    }
+    return `<ul class="understanding-list">${items.map(item => `<li>${escapeHtml(typeof item === 'string' ? item : JSON.stringify(item))}</li>`).join('')}</ul>`;
+  };
+
+  return `
+    ${result.coreDefinition ? `
+      <div class="understanding-section">
+        <h4>Core Definition</h4>
+        <p style="color: #ccc; font-size: 13px; line-height: 1.6;">${escapeHtml(result.coreDefinition)}</p>
+      </div>
+    ` : ''}
+    <div class="understanding-section">
+      <h4>Observable Markers</h4>
+      ${renderList(result.observableMarkers)}
+    </div>
+    <div class="understanding-section">
+      <h4>Anti-Patterns</h4>
+      ${renderList(result.antiPatterns)}
+    </div>
+    <div class="understanding-section">
+      <h4>Success Criteria</h4>
+      ${renderList(result.successCriteria)}
+    </div>
+    <div class="understanding-section">
+      <h4>Failure Criteria</h4>
+      ${renderList(result.failureCriteria)}
+    </div>
+    ${result.boundaryConditions ? `
+      <div class="understanding-section">
+        <h4>Boundary Conditions</h4>
+        ${renderList(result.boundaryConditions)}
+      </div>
+    ` : ''}
+  `;
+}
+
+function renderIdeationTab(ideation) {
+  if (!ideation?.scenarios || ideation.scenarios.length === 0) {
+    return '<div class="detail-empty">Ideation stage not yet completed.</div>';
+  }
+
+  return `
+    <div class="scenario-grid">
+      ${ideation.scenarios.map((scenario, idx) => `
+        <div class="scenario-card">
+          <div class="scenario-card-header">
+            <span class="scenario-id">#${idx + 1} ${scenario.id || ''}</span>
+            <div class="scenario-badges">
+              ${scenario.domain ? `<span class="scenario-badge badge-domain">${escapeHtml(scenario.domain)}</span>` : ''}
+              ${scenario.difficulty ? `<span class="scenario-badge badge-difficulty">${escapeHtml(scenario.difficulty)}</span>` : ''}
+            </div>
+          </div>
+          <div class="scenario-prompt">${escapeHtml(scenario.prompt || scenario.description || JSON.stringify(scenario))}</div>
+          ${scenario.context ? `<div class="scenario-context">${escapeHtml(scenario.context)}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderRolloutTab(rollout) {
+  if (!rollout?.transcripts || rollout.transcripts.length === 0) {
+    return '<div class="detail-empty">Rollout stage not yet completed.</div>';
+  }
+
+  return `
+    <div class="transcript-list">
+      ${rollout.transcripts.map((t, idx) => `
+        <div class="transcript-item">
+          <div class="transcript-header">
+            <div class="transcript-scenario-info">
+              <span class="transcript-scenario-id">#${idx + 1} ${t.scenarioId || ''}</span>
+              <span class="transcript-turn-count">${t.turnCount || t.transcript?.length || 0} turns</span>
+              ${t.completed === false ? '<span style="color: #f44336; font-size: 11px;">incomplete</span>' : ''}
+            </div>
+            <span class="transcript-chevron">&#9660;</span>
+          </div>
+          <div class="transcript-content">
+            <div class="transcript-messages">
+              ${(t.transcript || []).map(msg => `
+                <div class="transcript-bubble ${msg.role}">
+                  <div class="transcript-bubble-role">${msg.role}</div>
+                  ${escapeHtml(msg.content || '')}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderJudgmentTab(judgment) {
+  if (!judgment?.judgments || judgment.judgments.length === 0) {
+    return '<div class="detail-empty">Judgment stage not yet completed.</div>';
+  }
+
+  return `
+    <div class="judgment-grid">
+      ${judgment.judgments.map((j, idx) => {
+        const scorePercent = (j.score * 100).toFixed(0);
+        const scoreClass = j.score >= 0.7 ? 'high' : j.score >= 0.4 ? 'medium' : 'low';
+
+        return `
+          <div class="judgment-card">
+            <div class="judgment-card-header">
+              <span class="judgment-scenario-id">#${idx + 1} ${j.scenarioId || ''}</span>
+              <div>
+                <span class="judgment-score ${scoreClass}">${scorePercent}%</span>
+                ${j.confidence ? `<span class="judgment-confidence">(${(j.confidence * 100).toFixed(0)}% confident)</span>` : ''}
+              </div>
+            </div>
+            ${j.summary ? `<div class="judgment-summary">${escapeHtml(j.summary)}</div>` : ''}
+            ${j.positiveEvidence?.length ? `
+              <div class="evidence-section">
+                <h5 class="positive">Positive Evidence</h5>
+                <ul class="evidence-list positive">
+                  ${j.positiveEvidence.map(e => `<li>${escapeHtml(typeof e === 'string' ? e : e.explanation || JSON.stringify(e))}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+            ${j.negativeEvidence?.length ? `
+              <div class="evidence-section">
+                <h5 class="negative">Negative Evidence</h5>
+                <ul class="evidence-list negative">
+                  ${j.negativeEvidence.map(e => `<li>${escapeHtml(typeof e === 'string' ? e : e.explanation || JSON.stringify(e))}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderResultsTab(results, judgment) {
+  if (!results) {
+    return '<div class="detail-empty">Results not yet available.</div>';
+  }
+
+  const dist = results.scoreDistribution;
+  const validJudgments = judgment?.judgments?.filter(j => j.score !== null && j.score !== undefined) || [];
+
+  return `
+    <div class="results-summary">
+      <div class="results-stat">
+        <div class="results-stat-value">${results.overallScore !== null ? (results.overallScore * 100).toFixed(0) + '%' : 'N/A'}</div>
+        <div class="results-stat-label">Overall Score</div>
+      </div>
+      ${dist ? `
+        <div class="results-stat">
+          <div class="results-stat-value">${(dist.min * 100).toFixed(0)}% - ${(dist.max * 100).toFixed(0)}%</div>
+          <div class="results-stat-label">Score Range</div>
+        </div>
+        <div class="results-stat">
+          <div class="results-stat-value">${(dist.std * 100).toFixed(1)}%</div>
+          <div class="results-stat-label">Std Deviation</div>
+        </div>
+      ` : ''}
+      <div class="results-stat">
+        <div class="results-stat-value">${validJudgments.length}</div>
+        <div class="results-stat-label">Scenarios Judged</div>
+      </div>
+    </div>
+
+    ${results.keyQuotes?.length ? `
+      <div class="results-section">
+        <h4>Key Evidence</h4>
+        ${results.keyQuotes.map(q => `
+          <div class="key-quote-item">
+            <div class="key-quote-text">"${escapeHtml(q.quote || q.explanation || JSON.stringify(q))}"</div>
+            ${q.scenarioId ? `<div class="key-quote-source">Scenario: ${q.scenarioId}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${results.failurePatterns?.length ? `
+      <div class="results-section">
+        <h4>Failure Patterns</h4>
+        ${results.failurePatterns.map(f => `
+          <div class="failure-pattern-item">${escapeHtml(typeof f === 'string' ? f : f.summary || JSON.stringify(f))}</div>
+        `).join('')}
+      </div>
+    ` : ''}
+  `;
+}
+
+function renderComparisonsList() {
+  const list = document.getElementById('comparisons-list');
+  if (!list) return;
+
+  if (!comparisonsData || comparisonsData.length === 0) {
+    list.innerHTML = '<div style="color: #888; text-align: center; padding: 40px;">No A/B comparisons yet.</div>';
+    return;
+  }
+
+  list.innerHTML = comparisonsData.map(c => {
+    const behavior = behaviorsData?.find(b => b.key === c.behaviorKey);
+    const evalA = evaluationsData?.find(e => e.id === c.evaluationA);
+    const evalB = evaluationsData?.find(e => e.id === c.evaluationB);
+
+    return `
+      <div class="comparison-item" data-id="${c.id}">
+        <div class="evaluation-item-header">
+          <span class="evaluation-name">${escapeHtml(c.name)}</span>
+          <span class="evaluation-status status-${c.status}">${c.status}</span>
+        </div>
+        <div class="evaluation-behavior">Testing: ${behavior?.description || c.behaviorKey}</div>
+        ${c.results ? `
+          <div class="comparison-results">
+            <div class="comparison-variant ${c.results.winner === 'A' ? 'winner' : ''}">
+              <div class="variant-label">Variant A</div>
+              <div class="variant-score">${(c.results.scoreA * 100).toFixed(0)}%</div>
+            </div>
+            <div class="comparison-variant ${c.results.winner === 'B' ? 'winner' : ''}">
+              <div class="variant-label">Variant B</div>
+              <div class="variant-score">${(c.results.scoreB * 100).toFixed(0)}%</div>
+            </div>
+          </div>
+          <div style="text-align: center; margin-top: 12px; color: #4caf50; font-weight: 600;">
+            ${c.results.winner === 'tie' ? 'Tie' : `Winner: Variant ${c.results.winner}`}
+          </div>
+        ` : ''}
+        <div class="evaluation-actions" style="margin-top: 12px;">
+          <button class="run-comp-btn" ${c.status === 'running' || c.status === 'completed' ? 'disabled' : ''}>
+            ${c.status === 'running' ? 'Running...' : c.status === 'completed' ? 'Completed' : 'Run'}
+          </button>
+          <button class="delete-eval-btn">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('.run-comp-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.comparison-item');
+      const id = item.dataset.id;
+      await runComparison(id);
+      await loadEvaluations();
+    });
+  });
+
+  list.querySelectorAll('.delete-eval-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const item = e.target.closest('.comparison-item');
+      const id = item.dataset.id;
+      if (confirm('Delete this comparison?')) {
+        await deleteComparison(id);
+        await loadEvaluations();
+      }
+    });
+  });
+}
+
+function switchEvalView(view) {
+  currentEvalView = view;
+  document.querySelectorAll('.eval-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.evalView === view);
+  });
+  document.getElementById('evaluations-list').style.display = view === 'list' ? 'block' : 'none';
+  document.getElementById('comparisons-list').style.display = view === 'comparisons' ? 'block' : 'none';
+  document.getElementById('evaluation-detail').style.display = 'none';
+}
+
+async function openEvaluationDialog() {
+  if (!behaviorsData) {
+    behaviorsData = await fetchBehaviors();
+  }
+
+  const select = document.getElementById('eval-behavior-input');
+  select.innerHTML = behaviorsData.map(b =>
+    `<option value="${b.key}">${b.key} - ${b.description.substring(0, 50)}...</option>`
+  ).join('');
+
+  document.getElementById('eval-name-input').value = '';
+  document.getElementById('eval-prompt-input').value = '';
+  document.getElementById('eval-tier-input').value = 'standard';
+
+  document.getElementById('evaluation-dialog').showModal();
+}
+
+async function openComparisonDialog() {
+  if (!behaviorsData) {
+    behaviorsData = await fetchBehaviors();
+  }
+
+  const select = document.getElementById('comp-behavior-input');
+  select.innerHTML = behaviorsData.map(b =>
+    `<option value="${b.key}">${b.key} - ${b.description.substring(0, 50)}...</option>`
+  ).join('');
+
+  document.getElementById('comp-name-input').value = '';
+  document.getElementById('comp-prompt-a-input').value = '';
+  document.getElementById('comp-prompt-b-input').value = '';
+  document.getElementById('comp-tier-input').value = 'standard';
+
+  document.getElementById('comparison-dialog').showModal();
+}
+
+// Evaluation event listeners
+document.getElementById('new-evaluation-btn')?.addEventListener('click', openEvaluationDialog);
+document.getElementById('new-comparison-btn')?.addEventListener('click', openComparisonDialog);
+
+document.getElementById('cancel-eval-btn')?.addEventListener('click', () => {
+  document.getElementById('evaluation-dialog').close('cancel');
+});
+
+document.getElementById('cancel-comp-btn')?.addEventListener('click', () => {
+  document.getElementById('comparison-dialog').close('cancel');
+});
+
+document.getElementById('evaluation-dialog')?.addEventListener('close', async () => {
+  if (document.getElementById('evaluation-dialog').returnValue === 'cancel') return;
+
+  const name = document.getElementById('eval-name-input').value.trim();
+  const behaviorKey = document.getElementById('eval-behavior-input').value;
+  const systemPrompt = document.getElementById('eval-prompt-input').value.trim();
+  const tier = document.getElementById('eval-tier-input').value;
+
+  if (!name) return;
+
+  const promptConfig = systemPrompt ? { systemPrompt } : {};
+  await createEvaluation(name, behaviorKey, promptConfig, { tier });
+  await loadEvaluations();
+});
+
+document.getElementById('comparison-dialog')?.addEventListener('close', async () => {
+  if (document.getElementById('comparison-dialog').returnValue === 'cancel') return;
+
+  const name = document.getElementById('comp-name-input').value.trim();
+  const behaviorKey = document.getElementById('comp-behavior-input').value;
+  const promptA = document.getElementById('comp-prompt-a-input').value.trim();
+  const promptB = document.getElementById('comp-prompt-b-input').value.trim();
+  const tier = document.getElementById('comp-tier-input').value;
+
+  if (!name || !promptA || !promptB) return;
+
+  const comparison = await createComparison(name, promptA, promptB, behaviorKey, { tier });
+  await runComparison(comparison.id);
+  await loadEvaluations();
+});
+
+document.querySelectorAll('.eval-tab').forEach(tab => {
+  tab.addEventListener('click', () => switchEvalView(tab.dataset.evalView));
+});
+
+document.getElementById('back-to-list-btn')?.addEventListener('click', () => {
+  document.getElementById('evaluation-detail').style.display = 'none';
+  document.getElementById('evaluations-list').style.display = currentEvalView === 'list' ? 'block' : 'none';
+  document.getElementById('comparisons-list').style.display = currentEvalView === 'comparisons' ? 'block' : 'none';
 });
 
 // Initialize when DOM is ready

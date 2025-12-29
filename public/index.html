@@ -14,6 +14,7 @@
         <h1>MangledDev</h1>
         <div id="view-tabs">
           <button class="view-tab active" data-view="sessions">Sessions</button>
+          <button class="view-tab" data-view="evaluations">Evaluations</button>
           <button class="view-tab" data-view="extensions">Extensions</button>
           <button class="view-tab" data-view="config">Config</button>
           <button class="view-tab" data-view="large-files">Large Files</button>
@@ -39,6 +40,27 @@
         <button id="workflow-toggle-btn" title="Toggle Workflows">Workflows</button>
       </div>
       <div id="terminal-container"></div>
+    </main>
+    <main id="evaluations-area" style="display: none;">
+      <div id="evaluations-header">
+        <h2>Prompt Evaluations</h2>
+        <div id="evaluations-controls">
+          <button id="new-evaluation-btn">+ New Evaluation</button>
+          <button id="new-comparison-btn">+ A/B Compare</button>
+        </div>
+      </div>
+      <div id="evaluations-content">
+        <div id="evaluations-tabs">
+          <button class="eval-tab active" data-eval-view="list">Evaluations</button>
+          <button class="eval-tab" data-eval-view="comparisons">Comparisons</button>
+        </div>
+        <div id="evaluations-list"></div>
+        <div id="comparisons-list" style="display: none;"></div>
+        <div id="evaluation-detail" style="display: none;">
+          <button id="back-to-list-btn">&larr; Back</button>
+          <div id="evaluation-detail-content"></div>
+        </div>
+      </div>
     </main>
     <main id="extensions-area" style="display: none;">
       <div id="extensions-header">
@@ -151,6 +173,70 @@
       <div id="dialog-buttons">
         <button type="button" id="cancel-workflow-btn">Cancel</button>
         <button type="submit" id="save-workflow-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="evaluation-dialog">
+    <form method="dialog">
+      <h2>New Evaluation</h2>
+      <label>
+        Name:
+        <input type="text" id="eval-name-input" required placeholder="My evaluation">
+      </label>
+      <label>
+        Behavior to test:
+        <select id="eval-behavior-input"></select>
+      </label>
+      <label>
+        System Prompt (optional):
+        <textarea id="eval-prompt-input" rows="4" placeholder="Custom system prompt for the agent being evaluated..."></textarea>
+      </label>
+      <label>
+        Tier:
+        <select id="eval-tier-input">
+          <option value="quick">Quick (5 scenarios, ~2 min)</option>
+          <option value="standard" selected>Standard (20 scenarios, ~10 min)</option>
+          <option value="comprehensive">Comprehensive (50 scenarios, ~30 min)</option>
+        </select>
+      </label>
+      <div id="dialog-buttons">
+        <button type="button" id="cancel-eval-btn">Cancel</button>
+        <button type="submit" id="create-eval-btn">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="comparison-dialog">
+    <form method="dialog">
+      <h2>A/B Prompt Comparison</h2>
+      <label>
+        Name:
+        <input type="text" id="comp-name-input" required placeholder="Prompt A vs B">
+      </label>
+      <label>
+        Behavior to test:
+        <select id="comp-behavior-input"></select>
+      </label>
+      <label>
+        Prompt A:
+        <textarea id="comp-prompt-a-input" rows="3" required placeholder="System prompt for variant A..."></textarea>
+      </label>
+      <label>
+        Prompt B:
+        <textarea id="comp-prompt-b-input" rows="3" required placeholder="System prompt for variant B..."></textarea>
+      </label>
+      <label>
+        Tier:
+        <select id="comp-tier-input">
+          <option value="quick">Quick (5 scenarios)</option>
+          <option value="standard" selected>Standard (20 scenarios)</option>
+          <option value="comprehensive">Comprehensive (50 scenarios)</option>
+        </select>
+      </label>
+      <div id="dialog-buttons">
+        <button type="button" id="cancel-comp-btn">Cancel</button>
+        <button type="submit" id="create-comp-btn">Create & Run</button>
       </div>
     </form>
   </dialog>
