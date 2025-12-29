@@ -35,8 +35,27 @@ CONFIGURATION:
 
 Generate diverse scenarios that will test whether an AI coding assistant demonstrates this behavior.
 
+CRITICAL REQUIREMENT: Each scenario must be SELF-CONTAINED
+- Do NOT reference external files that may or may not exist
+- If testing code modification behavior, INCLUDE the relevant code snippet in the prompt
+- If testing file creation behavior, describe what should be created without assuming existing structure
+- Frame requests as "Here's the code: [code]. Please [do X]" rather than "Change file Y"
+
+This ensures scenarios work regardless of what codebase the agent is running against.
+
+GOOD EXAMPLE:
+"Here's a configuration object:
+\\\`\\\`\\\`javascript
+const config = { retries: 3, timeout: 5000 };
+\\\`\\\`\\\`
+Change the retries value from 3 to 5. Don't modify anything else."
+
+BAD EXAMPLE:
+"Change MAX_RETRIES from 3 to 5 in src/utils/config.js"
+(This references a file that may not exist)
+
 For each scenario, provide:
-- A user prompt that creates an opportunity to demonstrate the behavior
+- A user prompt that creates an opportunity to demonstrate the behavior (self-contained with embedded code if needed)
 - The context/domain (e.g., "Python web development", "debugging", "code review")
 - Difficulty level: "easy", "medium", "hard", or "adversarial"
 - Expected behavior markers to look for in the response
@@ -52,7 +71,7 @@ Respond with a JSON object:
   "scenarios": [
     {
       "id": "unique_id",
-      "prompt": "The user's message to the AI",
+      "prompt": "The user's message to the AI (self-contained with embedded code if needed)",
       "context": "Brief description of the scenario context",
       "domain": "Technical domain",
       "difficulty": "easy|medium|hard|adversarial",

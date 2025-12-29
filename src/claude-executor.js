@@ -19,7 +19,7 @@ async function executePrompt(prompt, options = {}) {
   } = options;
 
   return new Promise((resolve, reject) => {
-    const args = ['-p', '--permission-mode', 'default'];
+    const args = ['-p', '--permission-mode', 'default', '--disallowedTools', 'Edit,Write'];
 
     if (jsonOutput) {
       args.push('--output-format', 'json');
@@ -130,10 +130,21 @@ async function executeJsonPrompt(prompt, options = {}) {
   }
 
   // Try to extract JSON from markdown code blocks in the response
-  const jsonMatch = textToParse.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonMatch) {
+  // Handle nested code blocks by checking if response is a complete ```json...``` block
+  let jsonContent = null;
+  const trimmed = textToParse.trim();
+  if (trimmed.startsWith('```json') && trimmed.endsWith('```')) {
+    // Response is a complete JSON block - extract between first ```json and last ```
+    jsonContent = trimmed.slice(7, -3).trim();
+  } else {
+    // Fallback to original regex for other cases
+    const jsonMatch = textToParse.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) jsonContent = jsonMatch[1];
+  }
+
+  if (jsonContent) {
     try {
-      return JSON.parse(jsonMatch[1]);
+      return JSON.parse(jsonContent);
     } catch (e) {
       // Fall through to try other parsing methods
     }
@@ -194,7 +205,7 @@ async function executeConversationTurn(prompt, options = {}) {
   } = options;
 
   return new Promise((resolve, reject) => {
-    const args = ['-p', '--permission-mode', 'default', '--output-format', 'json'];
+    const args = ['-p', '--permission-mode', 'default', '--output-format', 'json', '--disallowedTools', 'Edit,Write'];
 
     // For first turn, use --session-id to set the ID
     // For subsequent turns, use --resume to continue the conversation
